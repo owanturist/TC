@@ -4,7 +4,8 @@
   "description": "Simple chart library",
   "main": "index.js",
   "scripts": {
-    "dev": "webpack-dev-server --inline --port=3000 --host=0.0.0.0"
+    "dev": "webpack-dev-server --inline --port=3000 --host=0.0.0.0",
+    "prod": "webpack-dev-server --inline --port=3000 --host=0.0.0.0 --env.prod"
   },
   "repository": {
     "type": "git",
@@ -26,12 +27,15 @@
     "css-loader": "^2.1.1",
     "elm-webpack-loader": "^5.0.0",
     "html-webpack-plugin": "^3.2.0",
+    "mini-css-extract-plugin": "^0.5.0",
+    "optimize-css-assets-webpack-plugin": "^5.0.1",
     "postcss-calc": "^7.0.1",
     "postcss-custom-properties": "^8.0.9",
     "postcss-import": "^12.0.1",
     "postcss-loader": "^3.0.0",
     "postcss-nested": "^4.1.2",
     "style-loader": "^0.23.1",
+    "uglifyjs-webpack-plugin": "^2.1.2",
     "webpack": "^4.29.6",
     "webpack-cli": "^3.2.3",
     "webpack-dev-server": "^3.2.1"
