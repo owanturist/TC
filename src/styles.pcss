@@ -1,3 +1,35 @@
-.foo path {
-    transition: d .2s;
+.main {
+    &__svg {
+        display: block;
+    }
+
+    &__container {
+        padding: 0 18px;
+    }
+
+    &__overview {
+        position: relative;
+    }
+
+    &__overview-selector {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        margin: 0;
+        display: flex;
+    }
+
+    &__overview-field {
+        box-sizing: border-box;
+        flex: 1 0 auto;
+        background: rgba(246, 250, 252, .7);
+
+        &_active {
+            background: transparent;
+            border: 0 solid rgba(221, 234, 243, .7);
+            border-width: 2px 5px;
+        }
+    }
 }

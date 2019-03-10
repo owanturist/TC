@@ -3,6 +3,7 @@ module Main exposing (main)
 import Browser
 import Data
 import Html exposing (Html, div, text)
+import Html.Attributes as Attributes
 import Svg exposing (Svg, path, svg)
 import Svg.Attributes
 import Task
@@ -132,11 +133,15 @@ viewCharts width height charts =
             charts
     of
         Nothing ->
-            svg [] []
+            svg
+                [ Svg.Attributes.class "main__svg"
+                ]
+                []
 
         Just { maximum, size } ->
             svg
-                [ Svg.Attributes.viewBox ("0 0 " ++ String.fromInt width ++ " " ++ String.fromInt height)
+                [ Svg.Attributes.class "main__svg"
+                , Svg.Attributes.viewBox ("0 0 " ++ String.fromInt width ++ " " ++ String.fromInt height)
                 ]
                 (List.filterMap
                     (viewChart (toFloat width / toFloat (size - 1)) (toFloat height / toFloat maximum))
@@ -144,9 +149,51 @@ viewCharts width height charts =
                 )
 
 
+viewOverviewSelector : Html msg
+viewOverviewSelector =
+    div
+        [ Attributes.class "main__overview-selector"
+        ]
+        [ div
+            [ Attributes.class "main__overview-field"
+            , Attributes.style "max-width" "20%"
+            ]
+            []
+        , div
+            [ Attributes.class "main__overview-field main__overview-field_active"
+            , Attributes.style "max-width" "40%"
+            ]
+            []
+        , div
+            [ Attributes.class "main__overview-field" ]
+            []
+        ]
+
+
+viewOverview : List (Data.Chart Int) -> Html msg
+viewOverview charts =
+    div
+        [ Attributes.class "main__overview"
+        ]
+        [ viewCharts 460 60 charts
+        , viewOverviewSelector
+        ]
+
+
+viewContainer : List (Html msg) -> Html msg
+viewContainer children =
+    div [ Attributes.class "main__container" ] children
+
+
 view : Model -> Html Msg
 view model =
-    text "hello world"
+    div
+        [ Attributes.class "main"
+        ]
+        [ viewContainer
+            [ viewOverview model.charts
+            ]
+        ]
 
 
 
@@ -162,6 +209,6 @@ main =
         , view =
             \model ->
                 Browser.Document "Charts"
-                    [ viewCharts 460 56 model.charts
+                    [ view model
                     ]
         }
