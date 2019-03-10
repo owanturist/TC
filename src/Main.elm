@@ -1,28 +1,86 @@
 module Main exposing (main)
 
 import Browser
+import DOM
 import Data
 import Html exposing (Html, div, text)
 import Html.Attributes as Attributes
+import Html.Events as Events
+import Json.Decode as Decode exposing (Decoder)
 import Svg exposing (Svg, path, svg)
 import Svg.Attributes
 import Task
 import Time
+import Utils.DOM
 
 
 
 -- M O D E L
 
 
+type Dragging
+    = NoDragging
+    | SelectorFromChanging Selector Float Float
+    | SelectorToChanging Selector Float Float
+    | SelectorAreaChanging Selector Float Float
+
+
+applyDragging : Dragging -> Float -> Maybe Selector
+applyDragging dragging end =
+    case dragging of
+        NoDragging ->
+            Nothing
+
+        SelectorFromChanging { from, area } start width ->
+            let
+                -- keep minumun 48px (converted to pct) width for dragging
+                delta =
+                    clamp -from (area - 48 / width) ((end - start) / width)
+            in
+            Just
+                { from = from + delta
+                , area = area - delta
+                }
+
+        SelectorToChanging { from, area } start width ->
+            let
+                -- keep minumun 48px (converted to pct) width for dragging
+                delta =
+                    clamp (-area + 48 / width) (1 - from - area) ((end - start) / width)
+            in
+            Just
+                { from = from
+                , area = area + delta
+                }
+
+        SelectorAreaChanging { from, area } start width ->
+            let
+                delta =
+                    clamp -from (1 - from - area) ((end - start) / width)
+            in
+            Just
+                { from = from + delta
+                , area = area
+                }
+
+
+type alias Selector =
+    { from : Float
+    , area : Float
+    }
+
+
 type alias Model =
-    { selector : ( Float, Float )
+    { selector : Selector
+    , dragging : Dragging
     , charts : List (Data.Chart Int)
     }
 
 
 init : flags -> ( Model, Cmd Msg )
 init _ =
-    ( { selector = ( 0, 1 )
+    ( { selector = Selector 0.2 0.4
+      , dragging = NoDragging
       , charts = []
       }
     , Task.perform (GenerateData << Data.generate 60) Time.now
@@ -34,24 +92,77 @@ init _ =
 
 
 type Msg
-    = NoOp
-    | GenerateData (List (Data.Chart Int))
+    = GenerateData (List (Data.Chart Int))
+    | StartSelectorFromChanging Float Float
+    | StartSelectorToChanging Float Float
+    | StartSelectorAreaChanging Float Float
+    | DragSelector Float
+    | DragEndSelector Float
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        NoOp ->
-            ( model, Cmd.none )
-
         GenerateData generatedCharts ->
             ( { model | charts = generatedCharts }
+            , Cmd.none
+            )
+
+        StartSelectorFromChanging start width ->
+            ( { model | dragging = SelectorFromChanging model.selector start width }
+            , Cmd.none
+            )
+
+        StartSelectorToChanging start width ->
+            ( { model | dragging = SelectorToChanging model.selector start width }
+            , Cmd.none
+            )
+
+        StartSelectorAreaChanging start width ->
+            ( { model | dragging = SelectorAreaChanging model.selector start width }
+            , Cmd.none
+            )
+
+        DragSelector end ->
+            ( { model | selector = Maybe.withDefault model.selector (applyDragging model.dragging end) }
+            , Cmd.none
+            )
+
+        DragEndSelector end ->
+            ( { model
+                | dragging = NoDragging
+                , selector = Maybe.withDefault model.selector (applyDragging model.dragging end)
+              }
             , Cmd.none
             )
 
 
 
 -- V I E W
+
+
+stop : Decoder msg -> Decoder ( msg, Bool )
+stop decoder =
+    Decode.map (\msg -> ( msg, True )) decoder
+
+
+withTouchX : (Float -> Msg) -> Decoder Msg
+withTouchX tagger =
+    Decode.float
+        |> Decode.at [ "changedTouches", "0", "pageX" ]
+        |> Decode.map tagger
+
+
+withTouchXandSelectorWidth : (Float -> Float -> Msg) -> Decoder Msg
+withTouchXandSelectorWidth tagger =
+    Decode.map2 tagger
+        (Decode.field "pageX" Decode.float)
+        (Decode.float
+            |> Decode.field "clientWidth"
+            |> Utils.DOM.closest "main__overview-selector"
+            |> DOM.target
+        )
+        |> Decode.at [ "changedTouches", "0" ]
 
 
 pct : Float -> String
@@ -115,6 +226,7 @@ viewChart scaleX scaleY chart =
 
 viewCharts : Int -> Int -> List (Data.Chart Int) -> Svg msg
 viewCharts width height charts =
+    -- TODO optimize maximum and size
     case
         List.foldr
             (\chart acc ->
@@ -157,34 +269,47 @@ viewCharts width height charts =
                 )
 
 
-viewOverviewSelector : ( Float, Float ) -> Html msg
-viewOverviewSelector ( from, area ) =
+viewOverviewSelector : Selector -> Dragging -> Html Msg
+viewOverviewSelector selector dragging =
+    let
+        handlers =
+            case dragging of
+                NoDragging ->
+                    []
+
+                _ ->
+                    [ Events.on "touchmove" (withTouchX DragSelector)
+                    , Events.on "touchend" (withTouchX DragEndSelector)
+                    ]
+    in
     div
-        [ Attributes.class "main__overview-selector"
-        ]
+        (Attributes.class "main__overview-selector"
+            :: handlers
+        )
         [ div
             [ Attributes.class "main__overview-field"
-            , Attributes.style "width" (pct (100 * from))
+            , Attributes.style "width" (pct (100 * selector.from))
             ]
             []
         , div
             [ Attributes.class "main__overview-field main__overview-field_active"
-            , Attributes.style "width" (pct (100 * area))
+            , Attributes.style "width" (pct (100 * selector.area))
+            , Events.on "touchstart" (withTouchXandSelectorWidth StartSelectorAreaChanging)
             ]
-            []
+            [ div
+                [ Attributes.class "main__overview-expander"
+                , Events.stopPropagationOn "touchstart" (stop (withTouchXandSelectorWidth StartSelectorFromChanging))
+                ]
+                []
+            , div
+                [ Attributes.class "main__overview-expander main__overview-expander_end"
+                , Events.stopPropagationOn "touchstart" (stop (withTouchXandSelectorWidth StartSelectorToChanging))
+                ]
+                []
+            ]
         , div
-            [ Attributes.class "main__overview-field" ]
+            [ Attributes.class "main__overview-field main__overview-field_end" ]
             []
-        ]
-
-
-viewOverview : ( Float, Float ) -> List (Data.Chart Int) -> Html msg
-viewOverview selector charts =
-    div
-        [ Attributes.class "main__overview"
-        ]
-        [ viewCharts 460 60 charts
-        , viewOverviewSelector selector
         ]
 
 
@@ -199,7 +324,12 @@ view model =
         [ Attributes.class "main"
         ]
         [ viewContainer
-            [ viewOverview model.selector model.charts
+            [ div
+                [ Attributes.class "main__overview"
+                ]
+                [ viewCharts 460 60 model.charts
+                , viewOverviewSelector model.selector model.dragging
+                ]
             ]
         ]
 
