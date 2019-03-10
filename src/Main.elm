@@ -15,13 +15,16 @@ import Time
 
 
 type alias Model =
-    { charts : List (Data.Chart Int)
+    { selector : ( Float, Float )
+    , charts : List (Data.Chart Int)
     }
 
 
 init : flags -> ( Model, Cmd Msg )
 init _ =
-    ( Model []
+    ( { selector = ( 0, 1 )
+      , charts = []
+      }
     , Task.perform (GenerateData << Data.generate 60) Time.now
     )
 
@@ -49,6 +52,11 @@ update msg model =
 
 
 -- V I E W
+
+
+pct : Float -> String
+pct value =
+    String.fromFloat value ++ "%"
 
 
 pathCoordinate : ( Float, Float ) -> String
@@ -149,19 +157,19 @@ viewCharts width height charts =
                 )
 
 
-viewOverviewSelector : Html msg
-viewOverviewSelector =
+viewOverviewSelector : ( Float, Float ) -> Html msg
+viewOverviewSelector ( from, area ) =
     div
         [ Attributes.class "main__overview-selector"
         ]
         [ div
             [ Attributes.class "main__overview-field"
-            , Attributes.style "max-width" "20%"
+            , Attributes.style "width" (pct (100 * from))
             ]
             []
         , div
             [ Attributes.class "main__overview-field main__overview-field_active"
-            , Attributes.style "max-width" "40%"
+            , Attributes.style "width" (pct (100 * area))
             ]
             []
         , div
@@ -170,13 +178,13 @@ viewOverviewSelector =
         ]
 
 
-viewOverview : List (Data.Chart Int) -> Html msg
-viewOverview charts =
+viewOverview : ( Float, Float ) -> List (Data.Chart Int) -> Html msg
+viewOverview selector charts =
     div
         [ Attributes.class "main__overview"
         ]
         [ viewCharts 460 60 charts
-        , viewOverviewSelector
+        , viewOverviewSelector selector
         ]
 
 
@@ -191,7 +199,7 @@ view model =
         [ Attributes.class "main"
         ]
         [ viewContainer
-            [ viewOverview model.charts
+            [ viewOverview model.selector model.charts
             ]
         ]
 
