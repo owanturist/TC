@@ -1,0 +1,16 @@
+*.sublime-project
+*.sublime-workspace
+.idea
+.vscode
+
+# ignore packages folders
+node_modules/
+elm-stuff/
+
+# ignore output js folder
+build/
+
+# ignore local config
+config/local.json
+src/App/Config.elm
+*.iml
