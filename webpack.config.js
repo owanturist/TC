@@ -3,6 +3,9 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const UglifyJsPlugin = require('uglifyjs-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const OptimizeCSSAssetsPlugin = require('optimize-css-assets-webpack-plugin');
+const {
+    BundleAnalyzerPlugin
+} = require('webpack-bundle-analyzer');
 
 module.exports = _env => {
     const env = _env || {};
@@ -16,7 +19,7 @@ module.exports = _env => {
 
         output: {
             path: path.resolve('./build'),
-            filename: '[name]-[hash].js'
+            filename: '_[hash].js'
         },
 
         module: {
@@ -91,8 +94,12 @@ module.exports = _env => {
             })
         ].concat(env.prod ? [
             new MiniCssExtractPlugin({
-                filename: "[name].css",
+                filename: "_[hash].css",
                 chunkFilename: "[id].css"
+            }),
+            new BundleAnalyzerPlugin({
+                analyzerMode: 'static',
+                reportFilename: 'bundle-report.html'
             })
         ] : []),
 

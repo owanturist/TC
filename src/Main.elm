@@ -1,7 +1,7 @@
 module Main exposing (main)
 
 import Browser
-import Html exposing (text)
+import Html exposing (div, text)
 
 
 main : Program () () ()
@@ -13,6 +13,6 @@ main =
         , view =
             \_ ->
                 Browser.Document "Charts"
-                    [ text "Hello world!"
+                    [ div [] [ text "Hello world!" ]
                     ]
         }
