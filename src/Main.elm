@@ -207,8 +207,8 @@ calculatePath points =
             Nothing
 
 
-viewChart : Float -> Float -> Data.Chart Int -> Maybe (Svg msg)
-viewChart scaleX scaleY chart =
+viewChart : Float -> Float -> Int -> Data.Chart Int -> Maybe (Svg msg)
+viewChart scaleX scaleY strokeWidth chart =
     chart.data
         |> List.indexedMap (\i ( _, value ) -> ( scaleX * toFloat i, scaleY * toFloat value ))
         |> calculatePath
@@ -216,7 +216,7 @@ viewChart scaleX scaleY chart =
             (\dValue ->
                 path
                     [ Svg.Attributes.stroke chart.color
-                    , Svg.Attributes.strokeWidth "1"
+                    , Svg.Attributes.strokeWidth (String.fromInt strokeWidth)
                     , Svg.Attributes.fill "none"
                     , Svg.Attributes.d dValue
                     ]
@@ -224,8 +224,14 @@ viewChart scaleX scaleY chart =
             )
 
 
-viewCharts : Int -> Int -> List (Data.Chart Int) -> Svg msg
-viewCharts width height charts =
+viewCharts :
+    { width : Int
+    , height : Int
+    , strokeWidth : Int
+    }
+    -> List (Data.Chart Int)
+    -> Svg msg
+viewCharts { width, height, strokeWidth } charts =
     -- TODO optimize maximum and size
     case
         List.foldr
@@ -264,7 +270,7 @@ viewCharts width height charts =
                 , Svg.Attributes.viewBox ("0 0 " ++ String.fromInt width ++ " " ++ String.fromInt height)
                 ]
                 (List.filterMap
-                    (viewChart (toFloat width / toFloat (size - 1)) (toFloat height / toFloat maximum))
+                    (viewChart (toFloat width / toFloat (size - 1)) (toFloat height / toFloat maximum) strokeWidth)
                     charts
                 )
 
@@ -308,7 +314,8 @@ viewOverviewSelector selector dragging =
                 []
             ]
         , div
-            [ Attributes.class "main__overview-field main__overview-field_end" ]
+            [ Attributes.class "main__overview-field main__overview-field_end"
+            ]
             []
         ]
 
@@ -318,16 +325,55 @@ viewContainer children =
     div [ Attributes.class "main__container" ] children
 
 
+foo : Selector -> List a -> List a
+foo selector list =
+    List.foldr
+        (\el { index, result, size } ->
+            let
+                current =
+                    1 - toFloat index / toFloat size
+
+                nextResult =
+                    if selector.from <= current && current <= (selector.from + selector.area) then
+                        el :: result
+
+                    else
+                        result
+            in
+            { index = index + 1
+            , result = nextResult
+            , size = size
+            }
+        )
+        { index = 0
+        , result = []
+        , size = List.length list
+        }
+        list
+        |> .result
+
+
 view : Model -> Html Msg
 view model =
     div
         [ Attributes.class "main"
         ]
-        [ viewContainer
+        [ viewCharts
+            { width = 460
+            , height = 460
+            , strokeWidth = 3
+            }
+            (List.map (\chart -> { chart | data = foo model.selector chart.data }) model.charts)
+        , viewContainer
             [ div
                 [ Attributes.class "main__overview"
                 ]
-                [ viewCharts 460 60 model.charts
+                [ viewCharts
+                    { width = 460
+                    , height = 60
+                    , strokeWidth = 1
+                    }
+                    model.charts
                 , viewOverviewSelector model.selector model.dragging
                 ]
             ]
