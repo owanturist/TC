@@ -50,12 +50,12 @@ update msg model =
 -- V I E W
 
 
-pathCoordinate : ( Int, Int ) -> String
+pathCoordinate : ( Float, Float ) -> String
 pathCoordinate ( x, y ) =
-    String.fromInt x ++ "," ++ String.fromInt y
+    String.fromFloat x ++ "," ++ String.fromFloat y
 
 
-m : Bool -> ( Int, Int ) -> String
+m : Bool -> ( Float, Float ) -> String
 m absolute coordinate =
     if absolute then
         "M" ++ pathCoordinate coordinate
@@ -64,7 +64,7 @@ m absolute coordinate =
         "m" ++ pathCoordinate coordinate
 
 
-l : Bool -> ( Int, Int ) -> String
+l : Bool -> ( Float, Float ) -> String
 l absolute coordinate =
     if absolute then
         "L" ++ pathCoordinate coordinate
@@ -73,7 +73,7 @@ l absolute coordinate =
         "l" ++ pathCoordinate coordinate
 
 
-calculatePath : List ( Int, Int ) -> Maybe String
+calculatePath : List ( Float, Float ) -> Maybe String
 calculatePath points =
     case points of
         first :: second :: rest ->
@@ -87,10 +87,10 @@ calculatePath points =
             Nothing
 
 
-viewChart : Data.Chart Int -> Maybe (Svg msg)
-viewChart chart =
+viewChart : Float -> Float -> Data.Chart Int -> Maybe (Svg msg)
+viewChart scaleX scaleY chart =
     chart.data
-        |> List.indexedMap (\i ( _, value ) -> ( 10 * i, value ))
+        |> List.indexedMap (\i ( _, value ) -> ( scaleX * toFloat i, scaleY * toFloat value ))
         |> calculatePath
         |> Maybe.map
             (\dValue ->
@@ -103,12 +103,46 @@ viewChart chart =
                     []
             )
 
-viewCharts : List (Data.Chart Int) -> Svg msg
-viewCharts charts =
-    svg
-        [ Svg.Attributes.viewBox "0 0 590 200"
-        ]
-        (List.filterMap viewChart charts)
+
+viewCharts : Int -> Int -> List (Data.Chart Int) -> Svg msg
+viewCharts width height charts =
+    case
+        List.foldr
+            (\chart acc ->
+                case ( acc, List.maximum (List.map Tuple.second chart.data) ) of
+                    ( Nothing, Nothing ) ->
+                        Nothing
+
+                    ( Nothing, Just maximum ) ->
+                        Just
+                            { maximum = maximum
+                            , size = List.length chart.data
+                            }
+
+                    ( prev, Nothing ) ->
+                        prev
+
+                    ( Just prev, Just maximum ) ->
+                        Just
+                            { maximum = max prev.maximum maximum
+                            , size = min prev.size (List.length chart.data)
+                            }
+            )
+            Nothing
+            charts
+    of
+        Nothing ->
+            svg [] []
+
+        Just { maximum, size } ->
+            svg
+                [ Svg.Attributes.viewBox ("0 0 " ++ String.fromInt width ++ " " ++ String.fromInt height)
+                ]
+                (List.filterMap
+                    (viewChart (toFloat width / toFloat (size - 1)) (toFloat height / toFloat maximum))
+                    charts
+                )
+
 
 view : Model -> Html Msg
 view model =
@@ -128,6 +162,6 @@ main =
         , view =
             \model ->
                 Browser.Document "Charts"
-                    [ viewCharts model.charts
+                    [ viewCharts 460 56 model.charts
                     ]
         }
