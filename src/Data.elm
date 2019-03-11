@@ -43,7 +43,7 @@ reformat json =
 type alias Line =
     { label : String
     , color : String
-    , points : List Int
+    , points : List Float
     }
 
 
@@ -52,7 +52,7 @@ lineDecoder lineId =
     Decode.map3 Line
         (Decode.at [ "names", lineId ] Decode.string)
         (Decode.at [ "colors", lineId ] Decode.string)
-        (Decode.at [ "columns", lineId ] (Decode.list Decode.int))
+        (Decode.at [ "columns", lineId ] (Decode.list Decode.float))
 
 
 type alias Chart =

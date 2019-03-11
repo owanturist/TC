@@ -204,7 +204,7 @@ calculatePath points =
 viewLine : Float -> Float -> Int -> Data.Line -> Maybe (Svg msg)
 viewLine scaleX scaleY strokeWidth chart =
     chart.points
-        |> List.indexedMap (\i value -> ( scaleX * toFloat i, scaleY * toFloat -value ))
+        |> List.indexedMap (\i value -> ( scaleX * toFloat i, scaleY * -value ))
         |> calculatePath
         |> Maybe.map
             (\dValue ->
@@ -261,7 +261,7 @@ viewChart { width, height, strokeWidth } chart =
 
             Just { maximum, size } ->
                 List.filterMap
-                    (viewLine (toFloat width / toFloat (size - 1)) (toFloat height / toFloat maximum) strokeWidth)
+                    (viewLine (toFloat width / toFloat (size - 1)) (toFloat height / maximum) strokeWidth)
                     chart.lines
         )
 
@@ -324,29 +324,51 @@ viewContainer children =
 --| 2 |
 
 
-foo : Selector -> List a -> List a
+foo : Selector -> List Float -> List Float
 foo selector list =
+    let
+        from =
+            selector.from
+
+        to =
+            selector.from + selector.area
+    in
     List.foldr
-        (\el { index, result, lastIndex } ->
+        (\el { index, result, lastIndex, right } ->
             let
                 boundary =
                     1 - index / lastIndex
 
-                nextResult =
-                    if selector.from <= boundary && boundary <= selector.from + selector.area then
-                        el :: result
+                ( nextResult, nextRight ) =
+                    if from <= boundary then
+                        if boundary <= to then
+                            ( case right of
+                                Nothing ->
+                                    el :: result
+
+                                Just ( b, r ) ->
+                                    el :: el + ((r - el) * (to - boundary ) / (b - boundary)) :: result
+                            , Nothing
+                            )
+
+                        else
+                            ( result
+                            , Just ( boundary, el )
+                            )
 
                     else
-                        result
+                        ( result, right )
             in
             { index = index + 1
             , result = nextResult
             , lastIndex = lastIndex
+            , right = nextRight
             }
         )
         { index = 0
         , result = []
         , lastIndex = toFloat (List.length list - 1)
+        , right = Nothing
         }
         list
         |> .result
