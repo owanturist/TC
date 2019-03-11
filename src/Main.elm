@@ -1,8 +1,9 @@
 module Main exposing (main)
 
 import Browser
+import Chart exposing (Chart)
 import DOM
-import Data
+import Dict exposing (Dict)
 import Html exposing (Html, div, text)
 import Html.Attributes as Attributes
 import Html.Events as Events
@@ -73,7 +74,7 @@ type alias Selector =
 type alias Model =
     { selector : Selector
     , dragging : Dragging
-    , chart : Result Decode.Error (Data.Chart Float)
+    , chart : Result Decode.Error (Chart Int Float)
     }
 
 
@@ -81,7 +82,7 @@ init : Value -> ( Model, Cmd Msg )
 init json =
     ( { selector = Selector 0 1
       , dragging = NoDragging
-      , chart = Result.map (Data.mapChart toFloat) (Data.decode json)
+      , chart = Result.map (Chart.mapXY Time.posixToMillis toFloat) (Chart.decode json)
       }
     , Cmd.none
     )
@@ -201,6 +202,8 @@ calculatePath points =
             Nothing
 
 
+
+{--
 viewLine : Float -> Float -> Int -> Data.Line Float -> Maybe (Svg msg)
 viewLine scaleX scaleY strokeWidth chart =
     chart.points
@@ -216,6 +219,39 @@ viewLine scaleX scaleY strokeWidth chart =
                     ]
                     []
             )
+--}
+
+
+makeViewBox : Int -> Int -> String
+makeViewBox width height =
+    String.join " "
+        [ "0"
+        , String.fromFloat (1.1 * toFloat -height)
+        , String.fromInt width
+        , String.fromFloat (1.1 * toFloat height)
+        ]
+
+
+makePaths : Float -> Float -> Int -> Chart Int Float -> Dict String String
+makePaths scaleX scaleY shiftX =
+    Chart.foldl
+        (\x points paths ->
+            List.foldr
+                (\( id, y ) ->
+                    Dict.update id
+                        (\path ->
+                            case path of
+                                Nothing ->
+                                    Just (m True ( scaleX * toFloat (x - shiftX), scaleY * -y ))
+
+                                Just prev ->
+                                    Just (prev ++ l True ( scaleX * toFloat (x - shiftX), scaleY * -y ))
+                        )
+                )
+                paths
+                points
+        )
+        Dict.empty
 
 
 viewChart :
@@ -223,15 +259,58 @@ viewChart :
     , height : Int
     , strokeWidth : Int
     }
-    -> Data.Chart Float
+    -> Chart Int Float
     -> Svg msg
 viewChart { width, height, strokeWidth } chart =
-    -- TODO optimize maximum and size
+    let
+        limits =
+            { minX = Chart.minimumX chart
+            , maxX = Chart.maximumX chart
+            , minY = Maybe.map (min 0) (Chart.minimumY chart)
+            , maxY = Chart.maximumY chart
+            }
+
+        scaleX =
+            case Maybe.map2 (-) limits.maxX limits.minX of
+                Nothing ->
+                    1
+
+                Just deltaX ->
+                    toFloat width / toFloat deltaX
+
+        scaleY =
+            case Maybe.map2 (-) limits.maxY limits.minY of
+                Nothing ->
+                    1
+
+                Just deltaY ->
+                    toFloat height / deltaY
+
+        shiftX =
+            Maybe.withDefault 0 limits.minX
+
+        paths =
+            makePaths scaleX scaleY shiftX chart
+                |> Dict.toList
+                |> List.filterMap
+                    (\( id, path ) ->
+                        Maybe.map2
+                            (\name color ->
+                                { id = id
+                                , name = name
+                                , color = color
+                                , path = path
+                                }
+                            )
+                            (Chart.getName id chart)
+                            (Chart.getColor id chart)
+                    )
+    in
     svg
         [ Svg.Attributes.class "main__svg"
-        , Svg.Attributes.viewBox ("0 " ++ String.fromFloat (-1.1 * toFloat height) ++ " " ++ String.fromInt width ++ " " ++ String.fromFloat (1.1 * toFloat height))
+        , Svg.Attributes.viewBox (makeViewBox width height)
         ]
-        (case
+        {--(case
             List.foldr
                 (\line acc ->
                     case ( acc, List.maximum line.points ) of
@@ -263,6 +342,19 @@ viewChart { width, height, strokeWidth } chart =
                 List.filterMap
                     (viewLine (toFloat width / toFloat (size - 1)) (toFloat height / maximum) strokeWidth)
                     chart.lines
+        )
+        --}
+        (List.map
+            (\config ->
+                path
+                    [ Svg.Attributes.stroke config.color
+                    , Svg.Attributes.strokeWidth (String.fromInt strokeWidth)
+                    , Svg.Attributes.fill "none"
+                    , Svg.Attributes.d config.path
+                    ]
+                    []
+            )
+            paths
         )
 
 
@@ -359,7 +451,7 @@ foo selector list =
                                 if List.isEmpty result then
                                     case right of
                                         Nothing ->
-                                            ( result , left , right )
+                                            ( result, left, right )
 
                                         Just ( b, r ) ->
                                             ( (el + ((r - el) * (from - boundary) / (b - boundary)))
@@ -393,22 +485,19 @@ foo selector list =
         |> .result
 
 
-view : Selector -> Dragging -> Data.Chart Float -> Html Msg
+view : Selector -> Dragging -> Chart Int Float -> Html Msg
 view selector dragging chart =
-    let
-        bar =
-            List.map (\line -> { line | points = foo selector line.points }) chart.lines
-    in
     div
         [ Attributes.class "main"
         ]
-        [ viewChart
+        [ {--viewChart
             { width = 460
             , height = 460
             , strokeWidth = 3
             }
             { chart | lines = bar }
-        , viewContainer
+        ,--}
+          viewContainer
             [ div
                 [ Attributes.class "main__overview"
                 ]
@@ -421,6 +510,8 @@ view selector dragging chart =
                 , viewOverviewSelector selector dragging
                 ]
             ]
+
+        --}
         ]
 
 
