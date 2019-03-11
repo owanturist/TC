@@ -79,7 +79,7 @@ type alias Model =
 
 init : Value -> ( Model, Cmd Msg )
 init json =
-    ( { selector = Selector 0.2 0.4
+    ( { selector = Selector 0 1
       , dragging = NoDragging
       , chart = Data.decode json
       }
@@ -204,7 +204,7 @@ calculatePath points =
 viewLine : Float -> Float -> Int -> Data.Line -> Maybe (Svg msg)
 viewLine scaleX scaleY strokeWidth chart =
     chart.points
-        |> List.indexedMap (\i value -> ( scaleX * toFloat i, scaleY * toFloat value ))
+        |> List.indexedMap (\i value -> ( scaleX * toFloat i, scaleY * toFloat -value ))
         |> calculatePath
         |> Maybe.map
             (\dValue ->
@@ -227,46 +227,43 @@ viewChart :
     -> Svg msg
 viewChart { width, height, strokeWidth } chart =
     -- TODO optimize maximum and size
-    case
-        List.foldr
-            (\line acc ->
-                case ( acc, List.maximum line.points ) of
-                    ( Nothing, Nothing ) ->
-                        Nothing
+    svg
+        [ Svg.Attributes.class "main__svg"
+        , Svg.Attributes.viewBox ("0 " ++ String.fromFloat (-1.1 * toFloat height) ++ " " ++ String.fromInt width ++ " " ++ String.fromFloat (1.1 * toFloat height))
+        ]
+        (case
+            List.foldr
+                (\line acc ->
+                    case ( acc, List.maximum line.points ) of
+                        ( Nothing, Nothing ) ->
+                            Nothing
 
-                    ( Nothing, Just maximum ) ->
-                        Just
-                            { maximum = maximum
-                            , size = List.length line.points
-                            }
+                        ( Nothing, Just maximum ) ->
+                            Just
+                                { maximum = maximum
+                                , size = List.length line.points
+                                }
 
-                    ( prev, Nothing ) ->
-                        prev
+                        ( prev, Nothing ) ->
+                            prev
 
-                    ( Just prev, Just maximum ) ->
-                        Just
-                            { maximum = max prev.maximum maximum
-                            , size = min prev.size (List.length line.points)
-                            }
-            )
-            Nothing
-            chart.lines
-    of
-        Nothing ->
-            svg
-                [ Svg.Attributes.class "main__svg"
-                ]
+                        ( Just prev, Just maximum ) ->
+                            Just
+                                { maximum = max prev.maximum maximum
+                                , size = min prev.size (List.length line.points)
+                                }
+                )
+                Nothing
+                chart.lines
+         of
+            Nothing ->
                 []
 
-        Just { maximum, size } ->
-            svg
-                [ Svg.Attributes.class "main__svg"
-                , Svg.Attributes.viewBox ("0 0 " ++ String.fromInt width ++ " " ++ String.fromInt height)
-                ]
-                (List.filterMap
+            Just { maximum, size } ->
+                List.filterMap
                     (viewLine (toFloat width / toFloat (size - 1)) (toFloat height / toFloat maximum) strokeWidth)
                     chart.lines
-                )
+        )
 
 
 viewOverviewSelector : Selector -> Dragging -> Html Msg
@@ -319,16 +316,24 @@ viewContainer children =
     div [ Attributes.class "main__container" ] children
 
 
+
+--| i | 10 | 100 | 50
+--|--------------
+--| 0 |
+--| 1 |
+--| 2 |
+
+
 foo : Selector -> List a -> List a
 foo selector list =
     List.foldr
-        (\el { index, result, size } ->
+        (\el { index, result, lastIndex } ->
             let
-                current =
-                    1 - toFloat index / toFloat size
+                boundary =
+                    1 - index / lastIndex
 
                 nextResult =
-                    if selector.from <= current && current <= (selector.from + selector.area) then
+                    if selector.from <= boundary && boundary <= selector.from + selector.area then
                         el :: result
 
                     else
@@ -336,12 +341,12 @@ foo selector list =
             in
             { index = index + 1
             , result = nextResult
-            , size = size
+            , lastIndex = lastIndex
             }
         )
         { index = 0
         , result = []
-        , size = List.length list
+        , lastIndex = toFloat (List.length list - 1)
         }
         list
         |> .result
