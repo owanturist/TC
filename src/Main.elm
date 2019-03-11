@@ -317,12 +317,6 @@ viewContainer children =
 
 
 
---| i | 10 | 100 | 50
---|--------------
---| 0 |
---| 1 |
---| 2 |
-
 
 foo : Selector -> List Float -> List Float
 foo selector list =
@@ -348,7 +342,7 @@ foo selector list =
 
                                 Just ( b, r ) ->
                                     el :: el + ((r - el) * (to - boundary) / (b - boundary)) :: result
-                            , left
+                            , Just ( boundary, el )
                             , Nothing
                             )
 
@@ -359,7 +353,15 @@ foo selector list =
                             )
 
                     else
-                        ( result, left, right )
+                        case left of
+                            Nothing ->
+                                ( result, left, right )
+
+                            Just ( b, le ) ->
+                                ( le + ((el - le) * (b - from) / (b - boundary)) :: result
+                                , Nothing
+                                , right
+                                )
             in
             { index = index + 1
             , result = nextResult
