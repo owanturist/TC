@@ -316,8 +316,6 @@ viewContainer children =
     div [ Attributes.class "main__container" ] children
 
 
-
-
 foo : Selector -> List Float -> List Float
 foo selector list =
     let
@@ -326,9 +324,12 @@ foo selector list =
 
         to =
             selector.from + selector.area
+
+        lastIndex =
+            toFloat (List.length list - 1)
     in
     List.foldr
-        (\el { index, result, lastIndex, left, right } ->
+        (\el { index, result, left, right } ->
             let
                 boundary =
                     1 - index / lastIndex
@@ -355,7 +356,21 @@ foo selector list =
                     else
                         case left of
                             Nothing ->
-                                ( result, left, right )
+                                if List.isEmpty result then
+                                    case right of
+                                        Nothing ->
+                                            ( result , left , right )
+
+                                        Just ( b, r ) ->
+                                            ( (el + ((r - el) * (from - boundary) / (b - boundary)))
+                                                :: (el + ((r - el) * (to - boundary) / (b - boundary)))
+                                                :: result
+                                            , left
+                                            , right
+                                            )
+
+                                else
+                                    ( result, left, right )
 
                             Just ( b, le ) ->
                                 ( le + ((el - le) * (b - from) / (b - boundary)) :: result
@@ -365,14 +380,12 @@ foo selector list =
             in
             { index = index + 1
             , result = nextResult
-            , lastIndex = lastIndex
             , left = nextLeft
             , right = nextRight
             }
         )
         { index = 0
         , result = []
-        , lastIndex = toFloat (List.length list - 1)
         , left = Nothing
         , right = Nothing
         }
