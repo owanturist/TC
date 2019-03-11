@@ -73,7 +73,7 @@ type alias Selector =
 type alias Model =
     { selector : Selector
     , dragging : Dragging
-    , chart : Result Decode.Error Data.Chart
+    , chart : Result Decode.Error (Data.Chart Float)
     }
 
 
@@ -81,7 +81,7 @@ init : Value -> ( Model, Cmd Msg )
 init json =
     ( { selector = Selector 0 1
       , dragging = NoDragging
-      , chart = Data.decode json
+      , chart = Result.map (Data.mapChart toFloat) (Data.decode json)
       }
     , Cmd.none
     )
@@ -201,7 +201,7 @@ calculatePath points =
             Nothing
 
 
-viewLine : Float -> Float -> Int -> Data.Line -> Maybe (Svg msg)
+viewLine : Float -> Float -> Int -> Data.Line Float -> Maybe (Svg msg)
 viewLine scaleX scaleY strokeWidth chart =
     chart.points
         |> List.indexedMap (\i value -> ( scaleX * toFloat i, scaleY * -value ))
@@ -223,7 +223,7 @@ viewChart :
     , height : Int
     , strokeWidth : Int
     }
-    -> Data.Chart
+    -> Data.Chart Float
     -> Svg msg
 viewChart { width, height, strokeWidth } chart =
     -- TODO optimize maximum and size
@@ -334,12 +334,12 @@ foo selector list =
             selector.from + selector.area
     in
     List.foldr
-        (\el { index, result, lastIndex, right } ->
+        (\el { index, result, lastIndex, left, right } ->
             let
                 boundary =
                     1 - index / lastIndex
 
-                ( nextResult, nextRight ) =
+                ( nextResult, nextLeft, nextRight ) =
                     if from <= boundary then
                         if boundary <= to then
                             ( case right of
@@ -347,34 +347,38 @@ foo selector list =
                                     el :: result
 
                                 Just ( b, r ) ->
-                                    el :: el + ((r - el) * (to - boundary ) / (b - boundary)) :: result
+                                    el :: el + ((r - el) * (to - boundary) / (b - boundary)) :: result
+                            , left
                             , Nothing
                             )
 
                         else
                             ( result
+                            , left
                             , Just ( boundary, el )
                             )
 
                     else
-                        ( result, right )
+                        ( result, left, right )
             in
             { index = index + 1
             , result = nextResult
             , lastIndex = lastIndex
+            , left = nextLeft
             , right = nextRight
             }
         )
         { index = 0
         , result = []
         , lastIndex = toFloat (List.length list - 1)
+        , left = Nothing
         , right = Nothing
         }
         list
         |> .result
 
 
-view : Selector -> Dragging -> Data.Chart -> Html Msg
+view : Selector -> Dragging -> Data.Chart Float -> Html Msg
 view selector dragging chart =
     let
         bar =

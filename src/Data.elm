@@ -1,4 +1,10 @@
-module Data exposing (Chart, Line, decode)
+module Data exposing
+    ( Chart
+    , Line
+    , decode
+    , mapChart
+    , mapLine
+    )
 
 import Json.Decode as Decode exposing (Decoder, decodeValue)
 import Json.Encode as Encode exposing (Value)
@@ -40,28 +46,38 @@ reformat json =
             Encode.object pairs
 
 
-type alias Line =
+type alias Line a =
     { label : String
     , color : String
-    , points : List Float
+    , points : List a
     }
 
 
-lineDecoder : String -> Decoder Line
+mapLine : (a -> b) -> Line a -> Line b
+mapLine fn { label, color, points } =
+    Line label color (List.map fn points)
+
+
+lineDecoder : String -> Decoder (Line Int)
 lineDecoder lineId =
     Decode.map3 Line
         (Decode.at [ "names", lineId ] Decode.string)
         (Decode.at [ "colors", lineId ] Decode.string)
-        (Decode.at [ "columns", lineId ] (Decode.list Decode.float))
+        (Decode.at [ "columns", lineId ] (Decode.list Decode.int))
 
 
-type alias Chart =
+type alias Chart a =
     { x : List Time.Posix
-    , lines : List Line
+    , lines : List (Line a)
     }
 
 
-chartDecoder : Decoder Chart
+mapChart : (a -> b) -> Chart a -> Chart b
+mapChart fn { x, lines } =
+    Chart x (List.map (mapLine fn) lines)
+
+
+chartDecoder : Decoder (Chart Int)
 chartDecoder =
     Decode.keyValuePairs Decode.string
         |> Decode.field "types"
@@ -97,6 +113,6 @@ chartDecoder =
             )
 
 
-decode : Value -> Result Decode.Error Chart
+decode : Value -> Result Decode.Error (Chart Int)
 decode json =
     decodeValue chartDecoder (reformat json)
