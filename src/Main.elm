@@ -6,7 +6,7 @@ import Data
 import Html exposing (Html, div, text)
 import Html.Attributes as Attributes
 import Html.Events as Events
-import Json.Decode as Decode exposing (Decoder)
+import Json.Decode as Decode exposing (Decoder, Value)
 import Svg exposing (Svg, path, svg)
 import Svg.Attributes
 import Task
@@ -73,17 +73,17 @@ type alias Selector =
 type alias Model =
     { selector : Selector
     , dragging : Dragging
-    , charts : List (Data.Chart Int)
+    , chart : Result Decode.Error Data.Chart
     }
 
 
-init : flags -> ( Model, Cmd Msg )
-init _ =
+init : Value -> ( Model, Cmd Msg )
+init json =
     ( { selector = Selector 0.2 0.4
       , dragging = NoDragging
-      , charts = []
+      , chart = Data.decode json
       }
-    , Task.perform (GenerateData << Data.generate 60) Time.now
+    , Cmd.none
     )
 
 
@@ -92,8 +92,7 @@ init _ =
 
 
 type Msg
-    = GenerateData (List (Data.Chart Int))
-    | StartSelectorFromChanging Float Float
+    = StartSelectorFromChanging Float Float
     | StartSelectorToChanging Float Float
     | StartSelectorAreaChanging Float Float
     | DragSelector Float
@@ -103,11 +102,6 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        GenerateData generatedCharts ->
-            ( { model | charts = generatedCharts }
-            , Cmd.none
-            )
-
         StartSelectorFromChanging start width ->
             ( { model | dragging = SelectorFromChanging model.selector start width }
             , Cmd.none
@@ -207,10 +201,10 @@ calculatePath points =
             Nothing
 
 
-viewChart : Float -> Float -> Int -> Data.Chart Int -> Maybe (Svg msg)
-viewChart scaleX scaleY strokeWidth chart =
-    chart.data
-        |> List.indexedMap (\i ( _, value ) -> ( scaleX * toFloat i, scaleY * toFloat value ))
+viewLine : Float -> Float -> Int -> Data.Line -> Maybe (Svg msg)
+viewLine scaleX scaleY strokeWidth chart =
+    chart.points
+        |> List.indexedMap (\i value -> ( scaleX * toFloat i, scaleY * toFloat value ))
         |> calculatePath
         |> Maybe.map
             (\dValue ->
@@ -224,26 +218,26 @@ viewChart scaleX scaleY strokeWidth chart =
             )
 
 
-viewCharts :
+viewChart :
     { width : Int
     , height : Int
     , strokeWidth : Int
     }
-    -> List (Data.Chart Int)
+    -> Data.Chart
     -> Svg msg
-viewCharts { width, height, strokeWidth } charts =
+viewChart { width, height, strokeWidth } chart =
     -- TODO optimize maximum and size
     case
         List.foldr
-            (\chart acc ->
-                case ( acc, List.maximum (List.map Tuple.second chart.data) ) of
+            (\line acc ->
+                case ( acc, List.maximum line.points ) of
                     ( Nothing, Nothing ) ->
                         Nothing
 
                     ( Nothing, Just maximum ) ->
                         Just
                             { maximum = maximum
-                            , size = List.length chart.data
+                            , size = List.length line.points
                             }
 
                     ( prev, Nothing ) ->
@@ -252,11 +246,11 @@ viewCharts { width, height, strokeWidth } charts =
                     ( Just prev, Just maximum ) ->
                         Just
                             { maximum = max prev.maximum maximum
-                            , size = min prev.size (List.length chart.data)
+                            , size = min prev.size (List.length line.points)
                             }
             )
             Nothing
-            charts
+            chart.lines
     of
         Nothing ->
             svg
@@ -270,8 +264,8 @@ viewCharts { width, height, strokeWidth } charts =
                 , Svg.Attributes.viewBox ("0 0 " ++ String.fromInt width ++ " " ++ String.fromInt height)
                 ]
                 (List.filterMap
-                    (viewChart (toFloat width / toFloat (size - 1)) (toFloat height / toFloat maximum) strokeWidth)
-                    charts
+                    (viewLine (toFloat width / toFloat (size - 1)) (toFloat height / toFloat maximum) strokeWidth)
+                    chart.lines
                 )
 
 
@@ -353,28 +347,32 @@ foo selector list =
         |> .result
 
 
-view : Model -> Html Msg
-view model =
+view : Selector -> Dragging -> Data.Chart -> Html Msg
+view selector dragging chart =
+    let
+        bar =
+            List.map (\line -> { line | points = foo selector line.points }) chart.lines
+    in
     div
         [ Attributes.class "main"
         ]
-        [ viewCharts
+        [ viewChart
             { width = 460
             , height = 460
             , strokeWidth = 3
             }
-            (List.map (\chart -> { chart | data = foo model.selector chart.data }) model.charts)
+            { chart | lines = bar }
         , viewContainer
             [ div
                 [ Attributes.class "main__overview"
                 ]
-                [ viewCharts
+                [ viewChart
                     { width = 460
                     , height = 60
                     , strokeWidth = 1
                     }
-                    model.charts
-                , viewOverviewSelector model.selector model.dragging
+                    chart
+                , viewOverviewSelector selector dragging
                 ]
             ]
         ]
@@ -384,7 +382,7 @@ view model =
 -- M A I N
 
 
-main : Program () Model Msg
+main : Program Value Model Msg
 main =
     Browser.document
         { init = init
@@ -393,6 +391,11 @@ main =
         , view =
             \model ->
                 Browser.Document "Charts"
-                    [ view model
+                    [ case model.chart of
+                        Err err ->
+                            text (Decode.errorToString err)
+
+                        Ok chart ->
+                            view model.selector model.dragging chart
                     ]
         }

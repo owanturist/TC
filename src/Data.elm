@@ -1,58 +1,102 @@
-module Data exposing (generate, Chart, Point)
+module Data exposing (Chart, Line, decode)
 
-import Random exposing (Generator)
+import Json.Decode as Decode exposing (Decoder, decodeValue)
+import Json.Encode as Encode exposing (Value)
 import Time
 
 
-millisecondsInDay : Int
-millisecondsInDay =
-    1000 * 60 * 60 * 24
+
+-- D E C O D I N G
 
 
-type alias Point a =
-    ( Time.Posix, a )
+reformat : Value -> Value
+reformat json =
+    let
+        columnsDecoder =
+            Decode.map2 Tuple.pair
+                (Decode.index 0 Decode.string)
+                (Decode.map (Encode.list identity << List.drop 1) (Decode.list Decode.value))
+                |> Decode.list
+
+        decoder =
+            Decode.map4
+                (\columns types names colors ->
+                    [ ( "columns", Encode.object columns )
+                    , ( "types", types )
+                    , ( "names", names )
+                    , ( "colors", colors )
+                    ]
+                )
+                (Decode.field "columns" columnsDecoder)
+                (Decode.field "types" Decode.value)
+                (Decode.field "names" Decode.value)
+                (Decode.field "colors" Decode.value)
+    in
+    case decodeValue decoder json of
+        Err _ ->
+            Encode.null
+
+        Ok pairs ->
+            Encode.object pairs
 
 
-pointGenerator : Int -> Generator a -> Generator (Point a)
-pointGenerator milliseconds dataGen =
-    Random.map (Tuple.pair (Time.millisToPosix milliseconds)) dataGen
-
-
-type alias Chart a =
+type alias Line =
     { label : String
     , color : String
-    , data : List (Point a)
+    , points : List Int
     }
 
 
-chartGenerator : String -> String -> Int -> Time.Posix -> Generator a -> Generator (Chart a)
-chartGenerator label color days now dataGen =
-    dataGen
-        |> Random.list days
-        |> Random.map
+lineDecoder : String -> Decoder Line
+lineDecoder lineId =
+    Decode.map3 Line
+        (Decode.at [ "names", lineId ] Decode.string)
+        (Decode.at [ "colors", lineId ] Decode.string)
+        (Decode.at [ "columns", lineId ] (Decode.list Decode.int))
+
+
+type alias Chart =
+    { x : List Time.Posix
+    , lines : List Line
+    }
+
+
+chartDecoder : Decoder Chart
+chartDecoder =
+    Decode.keyValuePairs Decode.string
+        |> Decode.field "types"
+        |> Decode.andThen
             (List.foldr
-                (\value acc ->
-                    { milliseconds = acc.milliseconds - millisecondsInDay
-                    , points = ( Time.millisToPosix acc.milliseconds, value ) :: acc.points
-                    }
+                (\( id, type_ ) acc ->
+                    case type_ of
+                        "x" ->
+                            Decode.map2
+                                (\tmp values -> { tmp | x = Just values })
+                                acc
+                                (Decode.at [ "columns", id ] (Decode.list (Decode.map Time.millisToPosix Decode.int)))
+
+                        "line" ->
+                            Decode.map2
+                                (\tmp line -> { tmp | lines = line :: tmp.lines })
+                                acc
+                                (lineDecoder id)
+
+                        unknown ->
+                            Decode.fail ("Unknown type :`" ++ unknown ++ "`.")
                 )
-                { milliseconds = Time.posixToMillis now
-                , points = []
-                }
+                (Decode.succeed { x = Nothing, lines = [] })
             )
-        |> Random.map (Chart label color << .points)
+        |> Decode.andThen
+            (\acc ->
+                case acc.x of
+                    Nothing ->
+                        Decode.fail "Field `x` isn't provided."
+
+                    Just x ->
+                        Decode.succeed (Chart x acc.lines)
+            )
 
 
-generate : Int -> Time.Posix -> List (Chart Int)
-generate days now =
-    let
-        seed0 =
-            Random.initialSeed (Time.posixToMillis now)
-
-        ( joined, seed1 ) =
-            Random.step (chartGenerator "Joined" "rgb(67, 192, 71)" days now (Random.int 0 200)) seed0
-
-        ( left, _ ) =
-            Random.step (chartGenerator "Left" "rgb(240, 78, 74)" days now (Random.int 20 150)) seed0
-    in
-    [ joined , left ]
+decode : Value -> Result Decode.Error Chart
+decode json =
+    decodeValue chartDecoder (reformat json)
