@@ -8,6 +8,7 @@ import Dict exposing (Dict)
 import Html exposing (Html, div, text)
 import Html.Attributes as Attributes
 import Html.Events as Events
+import Html.Lazy as Lazy
 import Json.Decode as Decode exposing (Decoder, Value)
 import Svg exposing (Svg, path, svg)
 import Svg.Attributes
@@ -257,7 +258,7 @@ view selector dragging chart =
     div
         [ Attributes.class "main"
         ]
-        [ viewChart
+        [ Lazy.lazy2 viewChart
             { width = 460
             , height = 460
             , strokeWidth = 3
@@ -267,13 +268,15 @@ view selector dragging chart =
             [ div
                 [ Attributes.class "main__overview"
                 ]
-                [ viewChart
+                [ Lazy.lazy2 viewChart
                     { width = 460
                     , height = 60
                     , strokeWidth = 1
                     }
                     chart
-                , viewOverviewSelector selector dragging
+                , Lazy.lazy2 viewOverviewSelector
+                    selector
+                    dragging
                 ]
             ]
 
