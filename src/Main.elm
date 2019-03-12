@@ -5,6 +5,7 @@ import Chart exposing (Chart)
 import DOM
 import Data
 import Dict exposing (Dict)
+import Foo
 import Html exposing (Html, div, text)
 import Html.Attributes as Attributes
 import Html.Events as Events
@@ -77,14 +78,40 @@ type alias Model =
     { selector : Selector
     , dragging : Dragging
     , chart : Result Decode.Error Data.Chart
+    , foo : Foo.Model
     }
 
 
 init : Value -> ( Model, Cmd Msg )
 init json =
+    let
+        chart =
+            Data.decode json
+
+        initialFoo =
+            case chart of
+                Err _ ->
+                    Foo.init
+                        identity
+                        identity
+                        1000
+                        ( 460, 460 )
+                        []
+                        Dict.empty
+
+                Ok { axisX, lines } ->
+                    Foo.init
+                        (toFloat << Time.posixToMillis)
+                        toFloat
+                        300
+                        ( 460, 460 )
+                        axisX
+                        lines
+    in
     ( { selector = Selector 0 1
       , dragging = NoDragging
       , chart = Data.decode json
+      , foo = initialFoo
       }
     , Cmd.none
     )
@@ -100,6 +127,7 @@ type Msg
     | StartSelectorAreaChanging Float Float
     | DragSelector Float
     | DragEndSelector Float
+    | FooMsg Foo.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -132,6 +160,25 @@ update msg model =
               }
             , Cmd.none
             )
+
+        FooMsg msgOfFoo ->
+            case Foo.update msgOfFoo model.foo of
+                Foo.Idle ->
+                    ( model, Cmd.none )
+
+                Foo.Updated nextFoo ->
+                    ( { model | foo = nextFoo }
+                    , Cmd.none
+                    )
+
+
+
+-- S U B S C R I P T I O N
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.map FooMsg (Foo.subscriptions model.foo)
 
 
 
@@ -294,8 +341,6 @@ view selector dragging chart =
                 , Lazy.lazy2 viewOverviewSelector selector dragging
                 ]
             ]
-
-        --}
         ]
 
 
@@ -308,11 +353,11 @@ main =
     Browser.document
         { init = init
         , update = update
-        , subscriptions = \_ -> Sub.none
+        , subscriptions = subscriptions
         , view =
             \model ->
                 Browser.Document "Charts"
-                    [ case model.chart of
+                    [ {--case model.chart of
                         Err err ->
                             text (Decode.errorToString err)
 
@@ -321,5 +366,6 @@ main =
                                 model.selector
                                 model.dragging
                                 (Chart.init (toFloat << Time.posixToMillis) toFloat chart.axisX chart.lines)
+                    , --}Html.map FooMsg (Foo.view model.foo)
                     ]
         }
