@@ -3,18 +3,18 @@ module Data exposing (Chart, Line, decode)
 import Json.Decode as Decode exposing (Decoder, decodeValue)
 import Json.Encode as Encode exposing (Value)
 import Time
-
+import Dict exposing (Dict)
 
 type alias Line =
     { name : String
     , color : String
-    , points : List Int
+    , value : List Int
     }
 
 
 type alias Chart =
     { axisX : List Time.Posix
-    , lines : List ( String, Line )
+    , lines : Dict String Line
     }
 
 
@@ -71,13 +71,13 @@ chartDecoder =
                     case type_ of
                         "x" ->
                             Decode.map2
-                                (\tmp values -> { tmp | axisX = Just values })
+                                (\tmp value -> { tmp | axisX = Just value })
                                 acc
                                 (Decode.at [ "columns", id ] (Decode.list (Decode.map Time.millisToPosix Decode.int)))
 
                         "line" ->
                             Decode.map2
-                                (\tmp line -> { tmp | lines = (id, line) :: tmp.lines })
+                                (\tmp line -> { tmp | lines = ( id, line ) :: tmp.lines })
                                 acc
                                 (lineDecoder id)
 
@@ -93,7 +93,7 @@ chartDecoder =
                         Decode.fail "Field `x` isn't provided."
 
                     Just axisX ->
-                        Decode.succeed (Chart axisX acc.lines)
+                        Decode.succeed (Chart axisX (Dict.fromList acc.lines))
             )
 
 

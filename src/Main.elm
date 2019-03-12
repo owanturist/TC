@@ -166,43 +166,6 @@ pct value =
     String.fromFloat value ++ "%"
 
 
-pathCoordinate : ( Float, Float ) -> String
-pathCoordinate ( x, y ) =
-    String.fromFloat x ++ "," ++ String.fromFloat y
-
-
-m : Bool -> ( Float, Float ) -> String
-m absolute coordinate =
-    if absolute then
-        "M" ++ pathCoordinate coordinate
-
-    else
-        "m" ++ pathCoordinate coordinate
-
-
-l : Bool -> ( Float, Float ) -> String
-l absolute coordinate =
-    if absolute then
-        "L" ++ pathCoordinate coordinate
-
-    else
-        "l" ++ pathCoordinate coordinate
-
-
-calculatePath : List ( Float, Float ) -> Maybe String
-calculatePath points =
-    case points of
-        first :: second :: rest ->
-            m True first
-                :: l True second
-                :: List.map (l True) rest
-                |> String.join " "
-                |> Just
-
-        _ ->
-            Nothing
-
-
 makeViewBox : Int -> Int -> String
 makeViewBox width height =
     String.join " "
@@ -231,7 +194,7 @@ viewChart { width, height, strokeWidth } chart =
                     [ Svg.Attributes.stroke line.color
                     , Svg.Attributes.strokeWidth (String.fromInt strokeWidth)
                     , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d line.points
+                    , Svg.Attributes.d line.value
                     ]
                     []
             )
@@ -287,83 +250,6 @@ viewOverviewSelector selector dragging =
 viewContainer : List (Html msg) -> Html msg
 viewContainer children =
     div [ Attributes.class "main__container" ] children
-
-
-foo : Selector -> List Float -> List Float
-foo selector list =
-    let
-        from =
-            selector.from
-
-        to =
-            selector.from + selector.area
-
-        lastIndex =
-            toFloat (List.length list - 1)
-    in
-    List.foldr
-        (\el { index, result, left, right } ->
-            let
-                boundary =
-                    1 - index / lastIndex
-
-                ( nextResult, nextLeft, nextRight ) =
-                    if from <= boundary then
-                        if boundary <= to then
-                            ( case right of
-                                Nothing ->
-                                    el :: result
-
-                                Just ( b, r ) ->
-                                    el :: el + ((r - el) * (to - boundary) / (b - boundary)) :: result
-                            , Just ( boundary, el )
-                            , Nothing
-                            )
-
-                        else
-                            ( result
-                            , left
-                            , Just ( boundary, el )
-                            )
-
-                    else
-                        case left of
-                            Nothing ->
-                                if List.isEmpty result then
-                                    case right of
-                                        Nothing ->
-                                            ( result, left, right )
-
-                                        Just ( b, r ) ->
-                                            ( (el + ((r - el) * (from - boundary) / (b - boundary)))
-                                                :: (el + ((r - el) * (to - boundary) / (b - boundary)))
-                                                :: result
-                                            , left
-                                            , right
-                                            )
-
-                                else
-                                    ( result, left, right )
-
-                            Just ( b, le ) ->
-                                ( le + ((el - le) * (b - from) / (b - boundary)) :: result
-                                , Nothing
-                                , right
-                                )
-            in
-            { index = index + 1
-            , result = nextResult
-            , left = nextLeft
-            , right = nextRight
-            }
-        )
-        { index = 0
-        , result = []
-        , left = Nothing
-        , right = Nothing
-        }
-        list
-        |> .result
 
 
 view : Selector -> Dragging -> Chart -> Html Msg

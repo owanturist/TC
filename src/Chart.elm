@@ -1,71 +1,124 @@
 module Chart exposing (Chart, draw, init, select)
 
 import Dict exposing (Dict)
-import Time
 
 
 type alias Line p =
     { name : String
     , color : String
-    , points : p
+    , value : p
     }
 
 
-mapPoints : (a -> b) -> Line a -> Line b
-mapPoints fn { name, color, points } =
-    Line name color (fn points)
+mapValue : (a -> b) -> Line a -> Line b
+mapValue fn { name, color, value } =
+    Line name color (fn value)
 
 
 type Chart
     = Chart (List Float) (Dict String (Line (List Float)))
 
 
-init : (x -> Float) -> (y -> Float) -> List x -> List ( String, Line (List y) ) -> Chart
-init mapX mapY axisX lines =
+init : (x -> Float) -> (y -> Float) -> List x -> Dict String (Line (List y)) -> Chart
+init mapX mapY timeline lines =
     let
         minLength =
-            List.foldr (min << List.length << .points << Tuple.second) (List.length axisX) lines
+            List.foldr
+                (min << List.length << .value)
+                (List.length timeline)
+                (Dict.values lines)
+
+        initialTimeline =
+            List.map mapX (List.take minLength timeline)
+
+        initialLines =
+            Dict.map (\_ -> mapValue (List.map mapY << List.take minLength)) lines
     in
-    lines
-        |> List.map (Tuple.mapSecond (mapPoints (List.map mapY << List.take minLength)))
-        |> Dict.fromList
-        |> Chart (List.map mapX <| List.take minLength axisX)
+    Chart initialTimeline initialLines
+
+
+type alias Limits =
+    { minimumX : Maybe Float
+    , maximumX : Maybe Float
+    , minimumY : Maybe Float
+    , maximumY : Maybe Float
+    }
+
+
+findLimits : List Float -> Dict String (Line (List Float)) -> Limits
+findLimits timeline lines =
+    let
+        minmax =
+            List.foldr
+                (\point acc ->
+                    case acc of
+                        Nothing ->
+                            Just ( point, point )
+
+                        Just ( minPoint, maxPoint ) ->
+                            Just ( min point minPoint, max point maxPoint )
+                )
+                Nothing
+
+        timelineLimits =
+            minmax timeline
+
+        ( linesMins, linesMaxs ) =
+            Dict.values lines
+                |> List.filterMap (minmax << .value)
+                |> List.unzip
+    in
+    Limits
+        (Maybe.map Tuple.first timelineLimits)
+        (Maybe.map Tuple.second timelineLimits)
+        (List.minimum (0 :: linesMins))
+        (List.maximum linesMaxs)
+
+
+type Approximation a
+    = NotApproximate
+    | ToLeft a
+    | ToRight a
+
+
+approximate : (value -> value -> value) -> List value -> List ( key, value ) -> List ( key, value )
+approximate approximator =
+    List.map2 (\target ( key, value ) -> ( key, approximator value target ))
+
+
+pushToLines : List ( comparable, value ) -> Dict comparable (List value) -> Dict comparable (List value)
+pushToLines newValues lines =
+    List.foldr
+        (\( key, value ) ->
+            Dict.update key
+                (\result ->
+                    case result of
+                        Nothing ->
+                            Just [ value ]
+
+                        Just values ->
+                            Just (value :: values)
+                )
+        )
+        lines
+        newValues
 
 
 select : Float -> Float -> Chart -> Chart
-select from to (Chart axisX lines) =
+select from to (Chart timeline lines) =
     let
-        ( from_, to_ ) =
-            ( max 0 from, min 1 to )
+        to_ =
+            clamp 0 1 to
+
+        from_ =
+            clamp 0 to_ from
 
         lastIndex =
-            toFloat (List.length axisX - 1)
+            toFloat (List.length timeline - 1)
 
-        fox : List ( String, Float ) -> Dict String (List Float) -> Dict String (List Float)
-        fox li d =
-            List.foldr
-                (\( lineId, y ) ->
-                    Dict.update lineId
-                        (\result ->
-                            case result of
-                                Nothing ->
-                                    Just [ y ]
-
-                                Just prev ->
-                                    Just (y :: prev)
-                        )
-                )
-                d
-                li
-
-        appl : (Float -> Float -> Float) -> List Float -> List ( String, Float ) -> List ( String, Float )
-        appl shifter =
-            List.map2
-                (\prev ( key, next ) -> ( key, shifter next prev ))
-
-        ( _, bar ) =
+        ( _, { nextTimeline, nextValues } ) =
             foldr
-                (\x foo ( index, acc ) ->
+                (\x values ( index, acc ) ->
                     let
                         boundary =
                             1 - index / lastIndex
@@ -73,79 +126,99 @@ select from to (Chart axisX lines) =
                     ( index + 1
                     , if from_ <= boundary then
                         if boundary <= to_ then
-                            case acc.right of
-                                Nothing ->
-                                    { nextX = x :: acc.nextX
-                                    , nextY = fox foo acc.nextY
-                                    , left = Just ( boundary, x, List.map Tuple.second foo )
-                                    , right = Nothing
+                            case acc.approximation of
+                                ToRight ( targetBoundary, targetX, targetValues ) ->
+                                    let
+                                        approximator current target =
+                                            current + (target - current) * (to_ - boundary) / (targetBoundary - boundary)
+
+                                        approximatedValues =
+                                            approximate approximator targetValues values
+                                    in
+                                    { nextTimeline = x :: approximator x targetX :: acc.nextTimeline
+                                    , nextValues = pushToLines values (pushToLines approximatedValues acc.nextValues)
+                                    , approximation = ToLeft ( boundary, x, List.map Tuple.second values )
                                     }
 
-                                Just ( b, px, pfoo ) ->
-                                    let
-                                        asd next prev =
-                                            next + (prev - next) * (to_ - boundary) / (b - boundary)
-                                    in
-                                    { nextX = x :: asd x px :: acc.nextX
-                                    , nextY = fox foo (fox (appl asd pfoo foo) acc.nextY)
-                                    , left = Just ( boundary, x, List.map Tuple.second foo )
-                                    , right = Nothing
+                                _ ->
+                                    { nextTimeline = x :: acc.nextTimeline
+                                    , nextValues = pushToLines values acc.nextValues
+                                    , approximation = ToLeft ( boundary, x, List.map Tuple.second values )
                                     }
 
                         else
-                            { acc | right = Just ( boundary, x, List.map Tuple.second foo ) }
+                            { acc | approximation = ToRight ( boundary, x, List.map Tuple.second values ) }
 
                       else
-                        case acc.left of
-                            Nothing ->
-                                case ( acc.nextX, acc.right ) of
-                                    ( [], Just ( b, px, pfoo ) ) ->
-                                        let
-                                            asd next prev =
-                                                next + (prev - next) * (from_ - boundary) / (b - boundary)
+                        case acc.approximation of
+                            NotApproximate ->
+                                acc
 
-                                            asd2 next prev =
-                                                next + (prev - next) * (to_ - boundary) / (b - boundary)
-                                        in
-                                        { nextX = asd x px :: asd2 x px :: acc.nextX
-                                        , nextY = fox (appl asd pfoo foo) (fox (appl asd2 pfoo foo) acc.nextY)
-                                        , left = acc.left
-                                        , right = acc.right
-                                        }
-
-                                    _ ->
-                                        acc
-
-                            Just ( b, px, pfoo ) ->
+                            ToLeft ( targetBoundary, targetX, targetValues ) ->
                                 let
-                                    asd prev next =
-                                        next + (prev - next) * (b - from_) / (b - boundary)
+                                    approximator target current =
+                                        current + (target - current) * (targetBoundary - from_) / (targetBoundary - boundary)
+
+                                    approximatedValues =
+                                        approximate approximator targetValues values
                                 in
-                                { nextX = asd x px :: acc.nextX
-                                , nextY = fox (appl asd pfoo foo) acc.nextY
-                                , left = Nothing
-                                , right = acc.right
+                                { nextTimeline = approximator x targetX :: acc.nextTimeline
+                                , nextValues = pushToLines approximatedValues acc.nextValues
+                                , approximation = NotApproximate
                                 }
+
+                            ToRight ( targetBoundary, targetX, targetValues ) ->
+                                if List.isEmpty acc.nextTimeline then
+                                    let
+                                        approximatorLeft current target =
+                                            current + (target - current) * (from_ - boundary) / (targetBoundary - boundary)
+
+                                        approximatorRight current target =
+                                            current + (target - current) * (to_ - boundary) / (targetBoundary - boundary)
+
+                                        approximatedLeftValues =
+                                            approximate approximatorLeft targetValues values
+
+                                        approximatedRightValues =
+                                            approximate approximatorRight targetValues values
+                                    in
+                                    { nextTimeline = [ approximatorLeft x targetX, approximatorRight x targetX ]
+                                    , nextValues = List.foldr pushToLines Dict.empty [ approximatedLeftValues, approximatedRightValues ]
+                                    , approximation = NotApproximate
+                                    }
+
+                                else
+                                    acc
                     )
                 )
                 ( 0
-                , { nextX = []
-                  , nextY = Dict.empty
-                  , left = Nothing
-                  , right = Nothing
+                , { nextTimeline = []
+                  , nextValues = Dict.empty
+                  , approximation = NotApproximate
                   }
                 )
-                (Chart axisX lines)
-
-        nextLines =
-            List.filterMap
-                (\( lineId, line ) ->
-                    Maybe.map (\nextPoints -> ( lineId, { line | points = nextPoints } )) (Dict.get lineId bar.nextY)
-                )
-                (Dict.toList lines)
-                |> Dict.fromList
+                timeline
+                lines
     in
-    Chart bar.nextX nextLines
+    case
+        Dict.merge
+            (\_ _ _ -> Nothing)
+            -- indicate a difference between input and output lineIds dicts
+            (\lineId line nextValue ->
+                Maybe.map (Dict.insert lineId { line | value = nextValue })
+            )
+            (\_ _ _ -> Nothing)
+            -- indicate a difference between input and output lineIds dicts
+            lines
+            nextValues
+            (Just Dict.empty)
+    of
+        -- at least one line has been lost or new one got
+        Nothing ->
+            Chart timeline lines
+
+        Just nextCorrectLines ->
+            Chart nextTimeline nextCorrectLines
 
 
 coordinate : Float -> Float -> String
@@ -153,36 +226,14 @@ coordinate x y =
     String.fromFloat x ++ "," ++ String.fromFloat y
 
 
-m : Bool -> Float -> Float -> String
-m absolute x y =
-    if absolute then
-        "M" ++ coordinate x y
-
-    else
-        "m" ++ coordinate x y
-
-
-l : Bool -> Float -> Float -> String
-l absolute x y =
-    if absolute then
-        "L" ++ coordinate x y
-
-    else
-        "l" ++ coordinate x y
-
-
 draw : Int -> Int -> Chart -> List (Line String)
-draw width height (Chart axisX lines) =
+draw width height (Chart timeline lines) =
     let
         limits =
-            { minX = minimumX (Chart axisX lines)
-            , maxX = maximumX (Chart axisX lines)
-            , minY = Maybe.map (min 0) (minimumY (Chart axisX lines))
-            , maxY = maximumY (Chart axisX lines)
-            }
+            findLimits timeline lines
 
         scaleX =
-            case Maybe.map2 (-) limits.maxX limits.minX of
+            case Maybe.map2 (-) limits.maximumX limits.minimumX of
                 Nothing ->
                     1
 
@@ -194,7 +245,7 @@ draw width height (Chart axisX lines) =
                         toFloat width / deltaX
 
         scaleY =
-            case Maybe.map2 (-) limits.maxY limits.minY of
+            case Maybe.map2 (-) limits.maximumY limits.minimumY of
                 Nothing ->
                     1
 
@@ -206,94 +257,53 @@ draw width height (Chart axisX lines) =
                         toFloat height / deltaY
 
         shiftX =
-            Maybe.withDefault 0 limits.minX
+            Maybe.withDefault 0 limits.minimumX
 
-        foo =
-            foldl
-                (\x points paths ->
-                    List.foldr
-                        (\( id, y ) ->
-                            Dict.update id
-                                (\path ->
-                                    case path of
-                                        Nothing ->
-                                            Just (m True (scaleX * (x - shiftX)) (scaleY * -y))
+        makeM x y =
+            "M" ++ coordinate (scaleX * (x - shiftX)) (scaleY * -y)
 
-                                        Just prev ->
-                                            Just (prev ++ l True (scaleX * (x - shiftX)) (scaleY * -y))
-                                )
-                        )
-                        paths
-                        points
-                )
-                Dict.empty
-                (Chart axisX lines)
+        makeL x y =
+            "L" ++ coordinate (scaleX * (x - shiftX)) (scaleY * -y)
     in
-    foo
-        |> Dict.toList
-        |> List.filterMap (\( lineId, path ) -> Maybe.map (mapPoints (always path)) (Dict.get lineId lines))
+    foldl
+        (\x values acc ->
+            List.foldr
+                (\( id, y ) ->
+                    Dict.update id
+                        (\result ->
+                            case result of
+                                Nothing ->
+                                    Maybe.map
+                                        (mapValue (\_ -> makeM x y))
+                                        (Dict.get id lines)
 
-
-length : Chart -> Int
-length (Chart axisX _) =
-    List.length axisX
-
-
-minimumX : Chart -> Maybe Float
-minimumX (Chart axisX _) =
-    List.minimum axisX
-
-
-maximumX : Chart -> Maybe Float
-maximumX (Chart axisX _) =
-    List.maximum axisX
-
-
-minimumY : Chart -> Maybe Float
-minimumY (Chart _ lines) =
-    lines
+                                Just line ->
+                                    Just (mapValue (\prev -> prev ++ makeL x y) line)
+                        )
+                )
+                acc
+                values
+        )
+        Dict.empty
+        timeline
+        lines
         |> Dict.values
-        |> List.filterMap (List.minimum << .points)
-        |> List.minimum
 
 
-maximumY : Chart -> Maybe Float
-maximumY (Chart _ lines) =
-    lines
-        |> Dict.values
-        |> List.filterMap (List.maximum << .points)
-        |> List.maximum
-
-
-get : (Line (List Float) -> a) -> String -> Chart -> Maybe a
-get getter lineId (Chart _ lines) =
-    Maybe.map getter (Dict.get lineId lines)
-
-
-getName : String -> Chart -> Maybe String
-getName =
-    get .name
-
-
-getColor : String -> Chart -> Maybe String
-getColor =
-    get .color
-
-
-step : List ( String, List y ) -> Maybe ( List ( String, y ), List ( String, List y ) )
-step =
+foldNext : List ( key, List y ) -> Maybe ( List ( key, y ), List ( key, List y ) )
+foldNext =
     List.foldr
-        (\( lineId, points ) asd ->
-            case asd of
+        (\( key, value ) acc ->
+            case acc of
                 Nothing ->
                     Nothing
 
-                Just ( a, b ) ->
-                    case points of
+                Just ( heads, tails ) ->
+                    case value of
                         first :: rest ->
                             Just
-                                ( ( lineId, first ) :: a
-                                , ( lineId, rest ) :: b
+                                ( ( key, first ) :: heads
+                                , ( key, rest ) :: tails
                                 )
 
                         [] ->
@@ -302,33 +312,29 @@ step =
         (Just ( [], [] ))
 
 
-foldl : (Float -> List ( String, Float ) -> a -> a) -> a -> Chart -> a
-foldl fn acc (Chart axisX lines) =
-    List.foldl
-        (\x ( a, b ) ->
-            case step b of
-                Nothing ->
-                    ( a, b )
+foldStep : (x -> List ( key, y ) -> acc -> acc) -> x -> ( acc, List ( key, List y ) ) -> ( acc, List ( key, List y ) )
+foldStep fn x ( acc, values ) =
+    case foldNext values of
+        Nothing ->
+            ( acc, values )
 
-                Just ( bunch, nextbar ) ->
-                    ( fn x bunch a, nextbar )
-        )
-        ( acc, List.map (Tuple.mapSecond .points) (Dict.toList lines) )
-        axisX
+        Just ( heads, tails ) ->
+            ( fn x heads acc, tails )
+
+
+foldl : (x -> List ( String, y ) -> acc -> acc) -> acc -> List x -> Dict String (Line (List y)) -> acc
+foldl fn acc timeline lines =
+    List.foldl
+        (foldStep fn)
+        ( acc, List.map (Tuple.mapSecond .value) (Dict.toList lines) )
+        timeline
         |> Tuple.first
 
 
-foldr : (Float -> List ( String, Float ) -> a -> a) -> a -> Chart -> a
-foldr fn acc (Chart axisX lines) =
+foldr : (x -> List ( String, y ) -> acc -> acc) -> acc -> List x -> Dict String (Line (List y)) -> acc
+foldr fn acc timeline lines =
     List.foldr
-        (\x ( a, b ) ->
-            case step b of
-                Nothing ->
-                    ( a, b )
-
-                Just ( bunch, nextbar ) ->
-                    ( fn x bunch a, nextbar )
-        )
-        ( acc, List.map (Tuple.mapSecond (List.reverse << .points)) (Dict.toList lines) )
-        axisX
+        (foldStep fn)
+        ( acc, List.map (Tuple.mapSecond (List.reverse << .value)) (Dict.toList lines) )
+        timeline
         |> Tuple.first
