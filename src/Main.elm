@@ -177,29 +177,56 @@ makeViewBox width height =
         ]
 
 
-viewChart :
+viewPaths :
     { width : Int
     , height : Int
     , strokeWidth : Int
     }
     -> Chart
-    -> Svg msg
-viewChart { width, height, strokeWidth } chart =
+    -> List (Svg msg)
+viewPaths { width, height, strokeWidth } chart =
+    List.map
+        (\line ->
+            path
+                [ Svg.Attributes.stroke line.color
+                , Svg.Attributes.strokeWidth (String.fromInt strokeWidth)
+                , Svg.Attributes.fill "none"
+                , Svg.Attributes.d line.value
+                ]
+                []
+        )
+        (Chart.draw width height chart)
+
+
+viewChart : Chart -> Html msg
+viewChart chart =
+    div []
+        [ svg
+            [ Svg.Attributes.class "main__svg"
+            , Svg.Attributes.viewBox (makeViewBox 460 460)
+            ]
+            (viewPaths
+                { width = 460
+                , height = 460
+                , strokeWidth = 3
+                }
+                chart
+            )
+        ]
+
+
+viewOverviewSvg : Chart -> Svg msg
+viewOverviewSvg chart =
     svg
         [ Svg.Attributes.class "main__svg"
-        , Svg.Attributes.viewBox (makeViewBox width height)
+        , Svg.Attributes.viewBox (makeViewBox 460 60)
         ]
-        (List.map
-            (\line ->
-                path
-                    [ Svg.Attributes.stroke line.color
-                    , Svg.Attributes.strokeWidth (String.fromInt strokeWidth)
-                    , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d line.value
-                    ]
-                    []
-            )
-            (Chart.draw width height chart)
+        (viewPaths
+            { width = 460
+            , height = 60
+            , strokeWidth = 1
+            }
+            chart
         )
 
 
@@ -258,25 +285,13 @@ view selector dragging chart =
     div
         [ Attributes.class "main"
         ]
-        [ Lazy.lazy2 viewChart
-            { width = 460
-            , height = 460
-            , strokeWidth = 3
-            }
-            (Chart.select selector.from (selector.from + selector.area) chart)
+        [ Lazy.lazy viewChart (Chart.select selector.from (selector.from + selector.area) chart)
         , viewContainer
             [ div
                 [ Attributes.class "main__overview"
                 ]
-                [ Lazy.lazy2 viewChart
-                    { width = 460
-                    , height = 60
-                    , strokeWidth = 1
-                    }
-                    chart
-                , Lazy.lazy2 viewOverviewSelector
-                    selector
-                    dragging
+                [ Lazy.lazy viewOverviewSvg chart
+                , Lazy.lazy2 viewOverviewSelector selector dragging
                 ]
             ]
 
