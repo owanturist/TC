@@ -3,6 +3,7 @@ module Main exposing (main)
 import Browser
 import Chart exposing (Chart)
 import DOM
+import Data
 import Dict exposing (Dict)
 import Html exposing (Html, div, text)
 import Html.Attributes as Attributes
@@ -74,7 +75,7 @@ type alias Selector =
 type alias Model =
     { selector : Selector
     , dragging : Dragging
-    , chart : Result Decode.Error (Chart Int Float)
+    , chart : Result Decode.Error Data.Chart
     }
 
 
@@ -82,7 +83,7 @@ init : Value -> ( Model, Cmd Msg )
 init json =
     ( { selector = Selector 0 1
       , dragging = NoDragging
-      , chart = Result.map (Chart.mapXY Time.posixToMillis toFloat) (Chart.decode json)
+      , chart = Data.decode json
       }
     , Cmd.none
     )
@@ -202,26 +203,6 @@ calculatePath points =
             Nothing
 
 
-
-{--
-viewLine : Float -> Float -> Int -> Data.Line Float -> Maybe (Svg msg)
-viewLine scaleX scaleY strokeWidth chart =
-    chart.points
-        |> List.indexedMap (\i value -> ( scaleX * toFloat i, scaleY * -value ))
-        |> calculatePath
-        |> Maybe.map
-            (\dValue ->
-                path
-                    [ Svg.Attributes.stroke chart.color
-                    , Svg.Attributes.strokeWidth (String.fromInt strokeWidth)
-                    , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d dValue
-                    ]
-                    []
-            )
---}
-
-
 makeViewBox : Int -> Int -> String
 makeViewBox width height =
     String.join " "
@@ -232,129 +213,29 @@ makeViewBox width height =
         ]
 
 
-makePaths : Float -> Float -> Int -> Chart Int Float -> Dict String String
-makePaths scaleX scaleY shiftX =
-    Chart.foldl
-        (\x points paths ->
-            List.foldr
-                (\( id, y ) ->
-                    Dict.update id
-                        (\path ->
-                            case path of
-                                Nothing ->
-                                    Just (m True ( scaleX * toFloat (x - shiftX), scaleY * -y ))
-
-                                Just prev ->
-                                    Just (prev ++ l True ( scaleX * toFloat (x - shiftX), scaleY * -y ))
-                        )
-                )
-                paths
-                points
-        )
-        Dict.empty
-
-
 viewChart :
     { width : Int
     , height : Int
     , strokeWidth : Int
     }
-    -> Chart Int Float
+    -> Chart
     -> Svg msg
 viewChart { width, height, strokeWidth } chart =
-    let
-        limits =
-            { minX = Chart.minimumX chart
-            , maxX = Chart.maximumX chart
-            , minY = Maybe.map (min 0) (Chart.minimumY chart)
-            , maxY = Chart.maximumY chart
-            }
-
-        scaleX =
-            case Maybe.map2 (-) limits.maxX limits.minX of
-                Nothing ->
-                    1
-
-                Just deltaX ->
-                    toFloat width / toFloat deltaX
-
-        scaleY =
-            case Maybe.map2 (-) limits.maxY limits.minY of
-                Nothing ->
-                    1
-
-                Just deltaY ->
-                    toFloat height / deltaY
-
-        shiftX =
-            Maybe.withDefault 0 limits.minX
-
-        paths =
-            makePaths scaleX scaleY shiftX chart
-                |> Dict.toList
-                |> List.filterMap
-                    (\( id, path ) ->
-                        Maybe.map2
-                            (\name color ->
-                                { id = id
-                                , name = name
-                                , color = color
-                                , path = path
-                                }
-                            )
-                            (Chart.getName id chart)
-                            (Chart.getColor id chart)
-                    )
-    in
     svg
         [ Svg.Attributes.class "main__svg"
         , Svg.Attributes.viewBox (makeViewBox width height)
         ]
-        {--(case
-            List.foldr
-                (\line acc ->
-                    case ( acc, List.maximum line.points ) of
-                        ( Nothing, Nothing ) ->
-                            Nothing
-
-                        ( Nothing, Just maximum ) ->
-                            Just
-                                { maximum = maximum
-                                , size = List.length line.points
-                                }
-
-                        ( prev, Nothing ) ->
-                            prev
-
-                        ( Just prev, Just maximum ) ->
-                            Just
-                                { maximum = max prev.maximum maximum
-                                , size = min prev.size (List.length line.points)
-                                }
-                )
-                Nothing
-                chart.lines
-         of
-            Nothing ->
-                []
-
-            Just { maximum, size } ->
-                List.filterMap
-                    (viewLine (toFloat width / toFloat (size - 1)) (toFloat height / maximum) strokeWidth)
-                    chart.lines
-        )
-        --}
         (List.map
-            (\config ->
+            (\line ->
                 path
-                    [ Svg.Attributes.stroke config.color
+                    [ Svg.Attributes.stroke line.color
                     , Svg.Attributes.strokeWidth (String.fromInt strokeWidth)
                     , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d config.path
+                    , Svg.Attributes.d line.points
                     ]
                     []
             )
-            paths
+            (Chart.draw width height chart)
         )
 
 
@@ -485,19 +366,18 @@ foo selector list =
         |> .result
 
 
-view : Selector -> Dragging -> Chart Int Float -> Html Msg
+view : Selector -> Dragging -> Chart -> Html Msg
 view selector dragging chart =
     div
         [ Attributes.class "main"
         ]
-        [ {--viewChart
+        [ viewChart
             { width = 460
             , height = 460
             , strokeWidth = 3
             }
-            { chart | lines = bar }
-        ,--}
-          viewContainer
+            (Chart.select selector.from (selector.from + selector.area) chart)
+        , viewContainer
             [ div
                 [ Attributes.class "main__overview"
                 ]
@@ -533,6 +413,9 @@ main =
                             text (Decode.errorToString err)
 
                         Ok chart ->
-                            view model.selector model.dragging chart
+                            view
+                                model.selector
+                                model.dragging
+                                (Chart.init (toFloat << Time.posixToMillis) toFloat chart.axisX chart.lines)
                     ]
         }
