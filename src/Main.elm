@@ -149,14 +149,26 @@ update msg model =
             )
 
         DragSelector end ->
-            ( { model | selector = Maybe.withDefault model.selector (applyDragging model.dragging end) }
+            let
+                nextSelector =
+                    Maybe.withDefault model.selector (applyDragging model.dragging end)
+            in
+            ( { model
+                | selector = nextSelector
+                , foo = Foo.select ( nextSelector.from, nextSelector.from + nextSelector.area ) model.foo
+              }
             , Cmd.none
             )
 
         DragEndSelector end ->
+            let
+                nextSelector =
+                    Maybe.withDefault model.selector (applyDragging model.dragging end)
+            in
             ( { model
                 | dragging = NoDragging
-                , selector = Maybe.withDefault model.selector (applyDragging model.dragging end)
+                , selector = nextSelector
+                , foo = Foo.select ( nextSelector.from, nextSelector.from + nextSelector.area ) model.foo
               }
             , Cmd.none
             )
@@ -332,8 +344,7 @@ view selector dragging chart =
     div
         [ Attributes.class "main"
         ]
-        [ Lazy.lazy viewChart (Chart.select selector.from (selector.from + selector.area) chart)
-        , viewContainer
+        [ viewContainer
             [ div
                 [ Attributes.class "main__overview"
                 ]
@@ -357,7 +368,8 @@ main =
         , view =
             \model ->
                 Browser.Document "Charts"
-                    [ {--case model.chart of
+                    [ Html.map FooMsg (Foo.view model.foo)
+                    , case model.chart of
                         Err err ->
                             text (Decode.errorToString err)
 
@@ -366,6 +378,5 @@ main =
                                 model.selector
                                 model.dragging
                                 (Chart.init (toFloat << Time.posixToMillis) toFloat chart.axisX chart.lines)
-                    , --}Html.map FooMsg (Foo.view model.foo)
                     ]
         }
