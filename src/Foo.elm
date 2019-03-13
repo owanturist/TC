@@ -216,6 +216,7 @@ type Model
     = Model Config Data State
 
 
+
 -- type alias Bar =
 --     { shiftX : Float
 --     , shiftY : Float
@@ -359,7 +360,7 @@ foo ( from, to ) config data state =
                                         approximatedValues =
                                             approximate approximator prevValues values
                                     in
-                                    { limitsX = Just (approximatedX, approximatedX)
+                                    { limitsX = Just ( approximatedX, x )
                                     , nextTimeline = barX x :: barX approximatedX :: acc.nextTimeline
                                     , nextValues = pushToLines barY values (pushToLines barY approximatedValues acc.nextValues)
                                     , approximation = ToRight ( boundary, x, List.map Tuple.second values )
@@ -449,9 +450,6 @@ foo ( from, to ) config data state =
                   }
                 )
                 data
-
-        asdk =
-            Debug.log "" k.limitsX
     in
     case
         Dict.merge
