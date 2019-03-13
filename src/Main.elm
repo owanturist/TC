@@ -103,7 +103,7 @@ init json =
                     Foo.init
                         (toFloat << Time.posixToMillis)
                         toFloat
-                        300
+                        500
                         ( 460, 460 )
                         axisX
                         lines

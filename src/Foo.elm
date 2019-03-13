@@ -71,6 +71,11 @@ dataToChart ( _, height ) data =
                 data.lines
 
 
+easeOutQuad : Float -> Float
+easeOutQuad done =
+    done * (2 - done)
+
+
 stateToPaths : Config -> State -> List (Line ( Float, Float ))
 stateToPaths config state =
     case state of
@@ -105,7 +110,7 @@ stateToPaths config state =
                                             y
 
                                         Just tmp ->
-                                            tmp + (y - tmp) * done
+                                            tmp + (y - tmp) * easeOutQuad done
                                     )
                                 )
                                 timeline
@@ -323,7 +328,6 @@ view (Model config data state) =
     in
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
-        , Svg.Attributes.style "box-shadow: 0 0 0 1px red inset"
         ]
         (List.map
             (\line ->
