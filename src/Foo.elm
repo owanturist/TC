@@ -259,11 +259,28 @@ approximate approximator =
     List.map2 (\target ( key, value ) -> ( key, approximator value target ))
 
 
-pushToLines : (Float -> Float) -> List ( String, Float ) -> Dict String (List ( Float, Maybe Float )) -> Dict String (List ( Float, Maybe Float ))
-pushToLines bar newValues lines =
+consToTimeline : (Float -> Float) -> Float -> ( Maybe ( Float, Float ), List Float ) -> ( Maybe ( Float, Float ), List Float )
+consToTimeline bar newX ( limits, acc ) =
+    ( case limits of
+        Nothing ->
+            Just ( newX, newX )
+
+        Just ( minX, _ ) ->
+            Just ( minX, newX )
+    , bar newX :: acc
+    )
+
+
+consToLines :
+    (Float -> Float)
+    -> List ( String, Float )
+    -> ( ( Float, Float ), Dict String (List ( Float, Maybe Float )) )
+    -> ( ( Float, Float ), Dict String (List ( Float, Maybe Float )) )
+consToLines bar newValues prev =
     List.foldr
-        (\( key, value ) ->
-            Dict.update key
+        (\( key, value ) ( limits, lines ) ->
+            ( Tuple.mapBoth (min value) (max value) limits
+            , Dict.update key
                 (\result ->
                     case result of
                         Nothing ->
@@ -272,8 +289,10 @@ pushToLines bar newValues lines =
                         Just values ->
                             Just (( bar value, Nothing ) :: values)
                 )
+                lines
+            )
         )
-        lines
+        prev
         newValues
 
 
@@ -339,6 +358,7 @@ foo ( from, to ) config data state =
                 data.lines
 
         ( _, k ) =
+            -- it builds timeline and Line.value in reversed order
             foldl
                 (\x values ( index, acc ) ->
                     let
@@ -360,25 +380,14 @@ foo ( from, to ) config data state =
                                         approximatedValues =
                                             approximate approximator prevValues values
                                     in
-                                    { limitsX = Just ( approximatedX, x )
-                                    , nextTimeline = barX x :: barX approximatedX :: acc.nextTimeline
-                                    , nextValues = pushToLines barY values (pushToLines barY approximatedValues acc.nextValues)
+                                    { selectedTimeline = consToTimeline barX x (consToTimeline barX approximatedX acc.selectedTimeline)
+                                    , selectedValues = consToLines barY values (consToLines barY approximatedValues acc.selectedValues)
                                     , approximation = ToRight ( boundary, x, List.map Tuple.second values )
                                     }
 
                                 _ ->
-                                    let
-                                        nextLimitsX =
-                                            case acc.limitsX of
-                                                Nothing ->
-                                                    Just ( x, x )
-
-                                                Just ( minX, _ ) ->
-                                                    Just ( minX, x )
-                                    in
-                                    { limitsX = nextLimitsX
-                                    , nextTimeline = barX x :: acc.nextTimeline
-                                    , nextValues = pushToLines barY values acc.nextValues
+                                    { selectedTimeline = consToTimeline barX x acc.selectedTimeline
+                                    , selectedValues = consToLines barY values acc.selectedValues
                                     , approximation = ToRight ( boundary, x, List.map Tuple.second values )
                                     }
 
@@ -407,9 +416,8 @@ foo ( from, to ) config data state =
                                         approximatedRightValues =
                                             approximate approximatorRight prevValues values
                                     in
-                                    { limitsX = Just ( aproximatedLeftX, aproximatedRightX )
-                                    , nextTimeline = List.map barX [ aproximatedLeftX, aproximatedRightX ]
-                                    , nextValues = List.foldr (pushToLines barY) Dict.empty [ approximatedLeftValues, approximatedRightValues ]
+                                    { selectedTimeline = List.foldr (consToTimeline barX) acc.selectedTimeline [ aproximatedRightX, aproximatedLeftX ]
+                                    , selectedValues = List.foldr (consToLines barY) acc.selectedValues [ approximatedRightValues, approximatedLeftValues ]
                                     , approximation = NotApproximate
                                     }
 
@@ -423,18 +431,9 @@ foo ( from, to ) config data state =
 
                                         approximatedValues =
                                             approximate approximator prevValues values
-
-                                        nextLimitsX =
-                                            case acc.limitsX of
-                                                Nothing ->
-                                                    Just ( approximatedX, approximatedX )
-
-                                                Just ( minX, _ ) ->
-                                                    Just ( minX, approximatedX )
                                     in
-                                    { limitsX = nextLimitsX
-                                    , nextTimeline = barX approximatedX :: acc.nextTimeline
-                                    , nextValues = pushToLines barY approximatedValues acc.nextValues
+                                    { selectedTimeline = consToTimeline barX approximatedX acc.selectedTimeline
+                                    , selectedValues = consToLines barY approximatedValues acc.selectedValues
                                     , approximation = NotApproximate
                                     }
 
@@ -443,9 +442,8 @@ foo ( from, to ) config data state =
                     )
                 )
                 ( 0
-                , { limitsX = Nothing
-                  , nextTimeline = []
-                  , nextValues = Dict.empty
+                , { selectedTimeline = ( Nothing, [] )
+                  , selectedValues = ( ( 0, 0 ), Dict.empty )
                   , approximation = NotApproximate
                   }
                 )
@@ -461,7 +459,7 @@ foo ( from, to ) config data state =
             (\_ _ _ -> Nothing)
             -- indicate a difference between input and output lineIds dicts
             data.lines
-            k.nextValues
+            (Tuple.second k.selectedValues)
             (Just Dict.empty)
     of
         -- at least one line has been lost or new one got
@@ -469,7 +467,7 @@ foo ( from, to ) config data state =
             Initialising
 
         Just nextCorrectLines ->
-            Animation config.duration k.nextTimeline nextCorrectLines
+            Animation config.duration (Tuple.second k.selectedTimeline) nextCorrectLines
 
 
 
