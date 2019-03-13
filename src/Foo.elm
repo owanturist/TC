@@ -216,7 +216,6 @@ type Model
     = Model Config Data State
 
 
-
 -- type alias Bar =
 --     { shiftX : Float
 --     , shiftY : Float
@@ -354,16 +353,30 @@ foo ( from, to ) config data state =
                                         approximator current prev =
                                             prev + (current - prev) * (from_ - prevBoundary) / (boundary - prevBoundary)
 
+                                        approximatedX =
+                                            approximator x prevX
+
                                         approximatedValues =
                                             approximate approximator prevValues values
                                     in
-                                    { nextTimeline = barX x :: barX (approximator x prevX) :: acc.nextTimeline
+                                    { limitsX = Just (approximatedX, approximatedX)
+                                    , nextTimeline = barX x :: barX approximatedX :: acc.nextTimeline
                                     , nextValues = pushToLines barY values (pushToLines barY approximatedValues acc.nextValues)
                                     , approximation = ToRight ( boundary, x, List.map Tuple.second values )
                                     }
 
                                 _ ->
-                                    { nextTimeline = barX x :: acc.nextTimeline
+                                    let
+                                        nextLimitsX =
+                                            case acc.limitsX of
+                                                Nothing ->
+                                                    Just ( x, x )
+
+                                                Just ( minX, _ ) ->
+                                                    Just ( minX, x )
+                                    in
+                                    { limitsX = nextLimitsX
+                                    , nextTimeline = barX x :: acc.nextTimeline
                                     , nextValues = pushToLines barY values acc.nextValues
                                     , approximation = ToRight ( boundary, x, List.map Tuple.second values )
                                     }
@@ -381,13 +394,20 @@ foo ( from, to ) config data state =
                                         approximatorRight current prev =
                                             prev + (current - prev) * (to_ - prevBoundary) / (boundary - prevBoundary)
 
+                                        aproximatedLeftX =
+                                            approximatorLeft x prevX
+
+                                        aproximatedRightX =
+                                            approximatorRight x prevX
+
                                         approximatedLeftValues =
                                             approximate approximatorLeft prevValues values
 
                                         approximatedRightValues =
                                             approximate approximatorRight prevValues values
                                     in
-                                    { nextTimeline = [ barX (approximatorLeft x prevX), barX (approximatorRight x prevX) ]
+                                    { limitsX = Just ( aproximatedLeftX, aproximatedRightX )
+                                    , nextTimeline = List.map barX [ aproximatedLeftX, aproximatedRightX ]
                                     , nextValues = List.foldr (pushToLines barY) Dict.empty [ approximatedLeftValues, approximatedRightValues ]
                                     , approximation = NotApproximate
                                     }
@@ -397,10 +417,22 @@ foo ( from, to ) config data state =
                                         approximator current prev =
                                             prev + (current - prev) * (to_ - prevBoundary) / (boundary - prevBoundary)
 
+                                        approximatedX =
+                                            approximator x prevX
+
                                         approximatedValues =
                                             approximate approximator prevValues values
+
+                                        nextLimitsX =
+                                            case acc.limitsX of
+                                                Nothing ->
+                                                    Just ( approximatedX, approximatedX )
+
+                                                Just ( minX, _ ) ->
+                                                    Just ( minX, approximatedX )
                                     in
-                                    { nextTimeline = barX (approximator x prevX) :: acc.nextTimeline
+                                    { limitsX = nextLimitsX
+                                    , nextTimeline = barX approximatedX :: acc.nextTimeline
                                     , nextValues = pushToLines barY approximatedValues acc.nextValues
                                     , approximation = NotApproximate
                                     }
@@ -410,12 +442,16 @@ foo ( from, to ) config data state =
                     )
                 )
                 ( 0
-                , { nextTimeline = []
+                , { limitsX = Nothing
+                  , nextTimeline = []
                   , nextValues = Dict.empty
                   , approximation = NotApproximate
                   }
                 )
                 data
+
+        asdk =
+            Debug.log "" k.limitsX
     in
     case
         Dict.merge
