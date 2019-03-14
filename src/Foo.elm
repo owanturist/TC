@@ -407,11 +407,9 @@ selectHelp ( from, to ) config data state =
     in
     case
         ( Dict.merge
-            (\_ _ _ -> Nothing)
-            -- indicate a difference between input and output lineIds dicts
+            {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
             (\lineId nextValue line -> Maybe.map (Dict.insert lineId (set nextValue line)))
-            (\_ _ _ -> Nothing)
-            -- indicate a difference between input and output lineIds dicts
+            {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
             (Tuple.second selectedValues)
             data.lines
             (Just Dict.empty)
@@ -441,7 +439,7 @@ selectHelp ( from, to ) config data state =
                             (Tuple.second selectedTimeline)
                             nextCorrectLines
 
-                Animation countdown _ limitsYStart limitsYEnd timeline lines ->
+                Animation countdown _ limitsYStart limitsYEnd _ _ ->
                     if limitsYEnd == limitsY then
                         Animation countdown
                             limitsX
@@ -454,11 +452,17 @@ selectHelp ( from, to ) config data state =
                         let
                             done =
                                 easeOutQuad (1 - countdown / config.duration)
+
+                            deltaYStart =
+                                limitsYStart.max - limitsYStart.min
+
+                            deltaYEnd =
+                                limitsYEnd.max - limitsYEnd.min
                         in
                         Animation config.duration
                             limitsX
-                            { min = limitsYStart.min + (limitsYEnd.min - limitsYStart.min) * done
-                            , max = limitsYStart.max + (limitsYEnd.max - limitsYStart.max) * done
+                            { min = limitsYStart.min
+                            , max = deltaYStart * deltaYEnd / (deltaYEnd + (deltaYStart - deltaYEnd) * done)
                             }
                             limitsY
                             (Tuple.second selectedTimeline)
@@ -529,88 +533,6 @@ makeViewBox { width, height } =
         ]
 
 
-viewAn : Config -> State -> Svg msg
-viewAn config state =
-    case state of
-        Empty ->
-            Svg.g [] []
-
-        Static _ limitsY _ _ ->
-            let
-                scaleY =
-                    if limitsY.min == limitsY.max then
-                        0
-
-                    else
-                        toFloat config.viewBox.height / (limitsY.max - limitsY.min)
-
-                d =
-                    ("M" ++ coordinate 0 (scaleY * -limitsY.min))
-                        ++ ("L" ++ coordinate 0 (scaleY * -limitsY.max))
-            in
-            Svg.g []
-                [ path
-                    [ Svg.Attributes.stroke "#99c"
-                    , Svg.Attributes.strokeWidth "10"
-                    , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d d
-                    ]
-                    []
-                ]
-
-        Animation countdown _ limitsYStart limitsYEnd _ _ ->
-            let
-                scaleYStart =
-                    if limitsYStart.max == 0 then
-                        0
-
-                    else
-                        toFloat config.viewBox.height / limitsYStart.max
-
-                scaleYEnd =
-                    if limitsYEnd.max == 0 then
-                        0
-
-                    else
-                        toFloat config.viewBox.height / limitsYEnd.max
-
-                scaleY =
-                    scaleYStart + (scaleYEnd - scaleYStart) * easeOutQuad (1 - countdown / config.duration)
-
-                dAnim =
-                    ("M" ++ coordinate 0 0) ++ ("L" ++ coordinate 0 (scaleY * -limitsYStart.max))
-
-                dStart =
-                    ("M" ++ coordinate 0 0) ++ ("L" ++ coordinate 0 (scaleYEnd * -limitsYStart.max))
-
-                dEnd =
-                    ("M" ++ coordinate 0 0) ++ ("L" ++ coordinate 0 (scaleYEnd * -limitsYEnd.max))
-            in
-            Svg.g []
-                [ path
-                    [ Svg.Attributes.stroke "#c9c"
-                    , Svg.Attributes.strokeWidth "30"
-                    , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d dAnim
-                    ]
-                    []
-                , path
-                    [ Svg.Attributes.stroke "#cc9"
-                    , Svg.Attributes.strokeWidth "20"
-                    , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d dStart
-                    ]
-                    []
-                , path
-                    [ Svg.Attributes.stroke "#99c"
-                    , Svg.Attributes.strokeWidth "10"
-                    , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d dEnd
-                    ]
-                    []
-                ]
-
-
 view : Model -> Svg msg
 view (Model config data state) =
     let
@@ -620,16 +542,15 @@ view (Model config data state) =
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         ]
-        (viewAn config state
-            :: List.map
-                (\line ->
-                    path
-                        [ Svg.Attributes.stroke line.color
-                        , Svg.Attributes.strokeWidth "3"
-                        , Svg.Attributes.fill "none"
-                        , Svg.Attributes.d line.value
-                        ]
-                        []
-                )
-                (draw config state)
+        (List.map
+            (\line ->
+                path
+                    [ Svg.Attributes.stroke line.color
+                    , Svg.Attributes.strokeWidth "1.5"
+                    , Svg.Attributes.fill "none"
+                    , Svg.Attributes.d line.value
+                    ]
+                    []
+            )
+            (draw config state)
         )
