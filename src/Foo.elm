@@ -9,33 +9,43 @@ import Svg.Attributes
 type alias Line a =
     { name : String
     , color : String
-    , value : List a
+    , value : a
     }
 
 
 map : (a -> b) -> Line a -> Line b
 map fn line =
-    set (List.map fn line.value) line
+    set (fn line.value) line
 
 
-set : List a -> Line b -> Line a
+set : a -> Line b -> Line a
 set nextValue { name, color } =
     Line name color nextValue
 
 
 type alias ViewBox =
-    ( Int, Int )
+    { width : Int
+    , height : Int
+    }
 
 
 type alias Config =
     { duration : Float
-    , viewBox : ( Int, Int )
+    , viewBox : ViewBox
     }
 
 
+type alias Timeline =
+    List Float
+
+
+type alias Lines =
+    Dict String (Line (List Float))
+
+
 type alias Data =
-    { timeline : List Float
-    , lines : Dict String (Line Float)
+    { timeline : Timeline
+    , lines : Lines
     }
 
 
@@ -71,8 +81,8 @@ foldStep fn x ( acc, values ) =
             ( fn x heads acc, tails )
 
 
-foldl : (Float -> List ( String, Float ) -> acc -> acc) -> acc -> Data -> acc
-foldl fn acc { timeline, lines } =
+foldl : (Float -> List ( String, Float ) -> acc -> acc) -> acc -> Timeline -> Lines -> acc
+foldl fn acc timeline lines =
     List.foldl
         (foldStep fn)
         ( acc, List.map (Tuple.mapSecond .value) (Dict.toList lines) )
@@ -80,75 +90,103 @@ foldl fn acc { timeline, lines } =
         |> Tuple.first
 
 
-type alias Chart =
-    Dict String (Dict Float Float)
+coordinate : Float -> Float -> String
+coordinate x y =
+    String.fromFloat x ++ "," ++ String.fromFloat y
 
 
-dataToChart : ViewBox -> Data -> Chart
-dataToChart ( _, height ) data =
-    case findLinesLimits data.lines of
-        Nothing ->
-            Dict.empty
+drawStep : (Float -> Float) -> (Float -> Float) -> Timeline -> List Float -> String
+drawStep mapX mapY timeline points =
+    case ( timeline, points ) of
+        ( firstX :: restX, firstY :: restY ) ->
+            List.foldl
+                (\x ( axisY, acc ) ->
+                    case axisY of
+                        [] ->
+                            ( [], acc )
 
-        Just ( minimumY, maximumY ) ->
-            let
-                deltaY =
-                    maximumY - minimumY
-
-                scaleY =
-                    if deltaY == 0 then
-                        0
-
-                    else
-                        toFloat height / deltaY
-            in
-            Dict.map
-                (\id line ->
-                    List.map2 (\x y -> ( x, scaleY * y ))
-                        data.timeline
-                        line.value
-                        |> Dict.fromList
+                        y :: nextY ->
+                            ( nextY
+                            , acc ++ "L" ++ coordinate (mapX x) (mapY -y)
+                            )
                 )
-                data.lines
+                ( restY, "M" ++ coordinate (mapX firstX) (mapY -firstY) )
+                restX
+                |> Tuple.second
+
+        _ ->
+            ""
 
 
-draw : (x -> y -> a) -> List x -> Dict String (Line y) -> List (Line a)
-draw fn timeline lines =
+drawHelp : (Float -> Float) -> (Float -> Float) -> Timeline -> Lines -> List (Line String)
+drawHelp mapX mapY timeline lines =
     List.map
-        (\line -> set (List.map2 fn timeline line.value) line)
+        (map (drawStep mapX mapY timeline))
         (Dict.values lines)
 
 
 easeOutQuad : Float -> Float
-easeOutQuad done =
-    done * (2 - done)
+easeOutQuad delta =
+    delta * (2 - delta)
 
 
-stateToPaths : Config -> State -> List (Line ( Float, Float ))
-stateToPaths config state =
+draw : Config -> State -> List (Line String)
+draw config state =
     case state of
-        Initialising ->
+        Empty ->
             []
 
-        Static timeline lines ->
-            draw Tuple.pair timeline lines
-
-        Animation countdown timeline lines ->
+        Static limits timeline lines ->
             let
-                done =
-                    1 - countdown / config.duration
-            in
-            draw
-                (\x ( target, real ) ->
-                    ( x
-                    , case real of
-                        Nothing ->
-                            target
+                scaleX =
+                    if limits.minimumX == limits.maximumX then
+                        0
 
-                        Just y ->
-                            y + (target - y) * easeOutQuad done
-                    )
-                )
+                    else
+                        toFloat config.viewBox.width / (limits.maximumX - limits.minimumX)
+
+                scaleY =
+                    if limits.minimumY == limits.maximumY then
+                        0
+
+                    else
+                        toFloat config.viewBox.height / (limits.maximumY - limits.minimumY)
+            in
+            drawHelp
+                (\x -> scaleX * (x - limits.minimumX))
+                (\y -> scaleY * y)
+                timeline
+                lines
+
+        Animation countdown limitsStart limitsEnd timeline lines ->
+            let
+                scaleX =
+                    if limitsEnd.minimumX == limitsEnd.maximumX then
+                        0
+
+                    else
+                        toFloat config.viewBox.width / (limitsEnd.maximumX - limitsEnd.minimumX)
+
+                scaleStartY =
+                    if limitsStart.minimumY == limitsStart.maximumY then
+                        0
+
+                    else
+                        toFloat config.viewBox.height / (limitsStart.maximumY - limitsStart.minimumY)
+
+                scaleEndY =
+                    if limitsEnd.minimumY == limitsEnd.maximumY then
+                        0
+
+                    else
+                        toFloat config.viewBox.height / (limitsEnd.maximumY - limitsEnd.minimumY)
+
+                scaleY =
+                    scaleStartY + (scaleEndY - scaleStartY) * easeOutQuad (1 - countdown / config.duration)
+            in
+            drawHelp
+                (\x -> scaleX * (x - limitsEnd.minimumX))
+                (\y -> scaleY * y)
                 timeline
                 lines
 
@@ -167,7 +205,7 @@ minmax =
         Nothing
 
 
-findLinesLimits : Dict String (Line Float) -> Maybe ( Float, Float )
+findLinesLimits : Lines -> Maybe ( Float, Float )
 findLinesLimits lines =
     let
         ( linesMins, linesMaxs ) =
@@ -181,71 +219,38 @@ findLinesLimits lines =
 
 
 type alias Limits =
-    { minimumX : Maybe Float
-    , maximumX : Maybe Float
-    , minimumY : Maybe Float
-    , maximumY : Maybe Float
+    { minimumX : Float
+    , maximumX : Float
+    , minimumY : Float
+    , maximumY : Float
     }
 
 
-findLimits : Data -> Limits
-findLimits { timeline, lines } =
-    let
-        timelineLimits =
-            minmax timeline
-
-        ( linesMins, linesMaxs ) =
-            Dict.values lines
-                |> List.filterMap (minmax << .value)
-                |> List.unzip
-    in
-    Limits
-        (Maybe.map Tuple.first timelineLimits)
-        (Maybe.map Tuple.second timelineLimits)
-        (List.minimum (0 :: linesMins))
-        (List.maximum linesMaxs)
-
-
 type State
-    = Initialising
-    | Static (List Float) (Dict String (Line Float))
-    | Animation Float (List Float) (Dict String (Line ( Float, Maybe Float )))
+    = Empty
+    | Static Limits Timeline Lines
+    | Animation Float Limits Limits Timeline Lines
 
 
 type Model
     = Model Config Data State
 
 
-
--- type alias Bar =
---     { shiftX : Float
---     , shiftY : Float
---     , scaleX : Float
---     , scaleYFrom : Maybe Float
---     , scaleYTo : Float
---     , timeline : List Float
---     , lines : Dict String (Line Float)
---     }
-
-
-init : (x -> Float) -> (y -> Float) -> Float -> ViewBox -> List x -> Dict String (Line y) -> Model
-init mapX mapY duration viewBox timeline lines =
+init : (x -> Float) -> (y -> Float) -> Float -> ViewBox -> (Float, Float) -> List x -> Dict String (Line (List y)) -> Model
+init mapX mapY duration viewBox selector timeline lines =
     let
-        config =
-            Config duration viewBox
-
         initialData =
-            Data (List.map mapX timeline) (Dict.map (\_ -> map mapY) lines)
+            Data (List.map mapX timeline) (Dict.map (\_ -> map (List.map mapY)) lines)
     in
     Model
-        config
+        (Config duration viewBox)
         initialData
-        (foo ( 0, 1 ) config initialData Initialising)
+        (foo selector duration initialData Empty)
 
 
 select : ( Float, Float ) -> Model -> Model
 select range (Model config data state) =
-    Model config data (foo range config data state)
+    Model config data (foo range config.duration data state)
 
 
 type Approximation a
@@ -254,24 +259,23 @@ type Approximation a
     | ToRight a
 
 
-consToTimeline : (Float -> Float) -> Float -> ( Maybe ( Float, Float ), List Float ) -> ( Maybe ( Float, Float ), List Float )
-consToTimeline bar newX ( limits, acc ) =
+consToTimeline : Float -> ( Maybe ( Float, Float ), Timeline ) -> ( Maybe ( Float, Float ), Timeline )
+consToTimeline newX ( limits, acc ) =
     ( case limits of
         Nothing ->
             Just ( newX, newX )
 
         Just ( minX, _ ) ->
             Just ( minX, newX )
-    , bar newX :: acc
+    , newX :: acc
     )
 
 
 consToLines :
-    (Float -> Float)
-    -> List ( String, Float )
-    -> ( Maybe ( Float, Float ), Dict String (List ( Float, Maybe Float )) )
-    -> ( Maybe ( Float, Float ), Dict String (List ( Float, Maybe Float )) )
-consToLines bar newValues prev =
+    List ( String, Float )
+    -> ( Maybe ( Float, Float ), Dict String (List Float) )
+    -> ( Maybe ( Float, Float ), Dict String (List Float) )
+consToLines newValues prev =
     List.foldr
         (\( key, value ) ( limits, lines ) ->
             ( case limits of
@@ -284,10 +288,10 @@ consToLines bar newValues prev =
                 (\result ->
                     case result of
                         Nothing ->
-                            Just [ ( bar value, Nothing ) ]
+                            Just [ value ]
 
                         Just values ->
-                            Just (( bar value, Nothing ) :: values)
+                            Just (value :: values)
                 )
                 lines
             )
@@ -301,8 +305,8 @@ approximate approximator =
     List.map2 (\target ( key, value ) -> ( key, approximator value target ))
 
 
-foo : ( Float, Float ) -> Config -> Data -> State -> State
-foo ( from, to ) config data state =
+foo : ( Float, Float ) -> Float -> Data -> State -> State
+foo ( from, to ) duration data state =
     let
         to_ =
             clamp 0 1 to
@@ -312,55 +316,6 @@ foo ( from, to ) config data state =
 
         lastIndex =
             toFloat (List.length data.timeline - 1)
-
-        ( width, height ) =
-            config.viewBox
-
-        limits =
-            findLimits data
-
-        scaleX =
-            case Maybe.map2 (-) limits.maximumX limits.minimumX of
-                Nothing ->
-                    1
-
-                Just deltaX ->
-                    if deltaX == 0 then
-                        0
-
-                    else
-                        toFloat width / deltaX
-
-        scaleY =
-            case Maybe.map2 (-) limits.maximumY limits.minimumY of
-                Nothing ->
-                    1
-
-                Just deltaY ->
-                    if deltaY == 0 then
-                        0
-
-                    else
-                        toFloat height / deltaY
-
-        shiftX =
-            Maybe.withDefault 0 limits.minimumX
-
-        barX x =
-            scaleX * (x - shiftX)
-
-        barY y =
-            scaleY * -y
-
-        tl a =
-            List.map
-                (\x -> scaleX * (x - shiftX))
-                data.timeline
-
-        b a =
-            Dict.map
-                (\_ -> map (\y -> ( scaleY * -y, Just 0 )))
-                data.lines
 
         ( _, k ) =
             -- it builds timeline and Line.value in reversed order
@@ -385,14 +340,14 @@ foo ( from, to ) config data state =
                                         approximatedValues =
                                             approximate approximator prevValues values
                                     in
-                                    { selectedTimeline = consToTimeline barX x (consToTimeline barX approximatedX acc.selectedTimeline)
-                                    , selectedValues = consToLines barY values (consToLines barY approximatedValues acc.selectedValues)
+                                    { selectedTimeline = consToTimeline x (consToTimeline approximatedX acc.selectedTimeline)
+                                    , selectedValues = consToLines values (consToLines approximatedValues acc.selectedValues)
                                     , approximation = ToRight ( boundary, x, List.map Tuple.second values )
                                     }
 
                                 _ ->
-                                    { selectedTimeline = consToTimeline barX x acc.selectedTimeline
-                                    , selectedValues = consToLines barY values acc.selectedValues
+                                    { selectedTimeline = consToTimeline x acc.selectedTimeline
+                                    , selectedValues = consToLines values acc.selectedValues
                                     , approximation = ToRight ( boundary, x, List.map Tuple.second values )
                                     }
 
@@ -421,8 +376,8 @@ foo ( from, to ) config data state =
                                         approximatedRightValues =
                                             approximate approximatorRight prevValues values
                                     in
-                                    { selectedTimeline = List.foldr (consToTimeline barX) acc.selectedTimeline [ aproximatedRightX, aproximatedLeftX ]
-                                    , selectedValues = List.foldr (consToLines barY) acc.selectedValues [ approximatedRightValues, approximatedLeftValues ]
+                                    { selectedTimeline = List.foldr consToTimeline acc.selectedTimeline [ aproximatedRightX, aproximatedLeftX ]
+                                    , selectedValues = List.foldr consToLines acc.selectedValues [ approximatedRightValues, approximatedLeftValues ]
                                     , approximation = NotApproximate
                                     }
 
@@ -437,8 +392,8 @@ foo ( from, to ) config data state =
                                         approximatedValues =
                                             approximate approximator prevValues values
                                     in
-                                    { selectedTimeline = consToTimeline barX approximatedX acc.selectedTimeline
-                                    , selectedValues = consToLines barY approximatedValues acc.selectedValues
+                                    { selectedTimeline = consToTimeline approximatedX acc.selectedTimeline
+                                    , selectedValues = consToLines approximatedValues acc.selectedValues
                                     , approximation = NotApproximate
                                     }
 
@@ -452,27 +407,32 @@ foo ( from, to ) config data state =
                   , approximation = NotApproximate
                   }
                 )
-                data
+                data.timeline
+                data.lines
     in
     case
-        Dict.merge
+        ( Dict.merge
             (\_ _ _ -> Nothing)
             -- indicate a difference between input and output lineIds dicts
-            (\lineId line nextValue ->
-                Maybe.map (Dict.insert lineId (set nextValue line))
-            )
+            (\lineId nextValue line -> Maybe.map (Dict.insert lineId (set nextValue line)))
             (\_ _ _ -> Nothing)
             -- indicate a difference between input and output lineIds dicts
-            data.lines
             (Tuple.second k.selectedValues)
+            data.lines
             (Just Dict.empty)
+        , Tuple.first k.selectedTimeline
+        , Tuple.first k.selectedValues
+        )
     of
-        -- at least one line has been lost or new one got
-        Nothing ->
-            Initialising
+        ( Just nextCorrectLines, Just ( minimumX, maximumX ), Just ( minimumY, maximumY ) ) ->
+            Animation duration
+                (Limits minimumX maximumX 0 0)
+                (Limits minimumX maximumX (min 0 minimumY) (max 0 maximumY))
+                (Tuple.second k.selectedTimeline)
+                nextCorrectLines
 
-        Just nextCorrectLines ->
-            Animation config.duration (Tuple.second k.selectedTimeline) nextCorrectLines
+        _ ->
+            Empty
 
 
 
@@ -493,15 +453,14 @@ update msg (Model config data state) =
     case msg of
         Tick delta ->
             case state of
-                Animation countdown timeline chart ->
+                Animation countdown limitsStart limitsEnd timeline chart ->
                     if delta >= countdown then
-                        Dict.map (\_ -> map Tuple.first) chart
-                            |> Static timeline
+                        Static limitsEnd timeline chart
                             |> Model config data
                             |> Updated
 
                     else
-                        Animation (countdown - delta) timeline chart
+                        Animation (countdown - delta) limitsStart limitsEnd timeline chart
                             |> Model config data
                             |> Updated
 
@@ -516,7 +475,7 @@ update msg (Model config data state) =
 subscriptions : Model -> Sub Msg
 subscriptions (Model config data state) =
     case state of
-        Animation _ _ _ ->
+        Animation _ _ _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
 
         _ ->
@@ -528,7 +487,7 @@ subscriptions (Model config data state) =
 
 
 makeViewBox : ViewBox -> String
-makeViewBox ( width, height ) =
+makeViewBox { width, height } =
     String.join " "
         [ "0"
         , String.fromFloat (1.1 * toFloat -height)
@@ -537,28 +496,11 @@ makeViewBox ( width, height ) =
         ]
 
 
-coordinate : ( Float, Float ) -> String
-coordinate ( x, y ) =
-    String.fromFloat x ++ "," ++ String.fromFloat y
-
-
-pointsToPath : List ( Float, Float ) -> String
-pointsToPath points =
-    case points of
-        [] ->
-            ""
-
-        first :: rest ->
-            List.foldl (\point acc -> acc ++ "L" ++ coordinate point)
-                ("M" ++ coordinate first)
-                rest
-
-
 view : Model -> Svg msg
 view (Model config data state) =
     let
         chart =
-            stateToPaths config state
+            draw config state
     in
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
@@ -569,9 +511,9 @@ view (Model config data state) =
                     [ Svg.Attributes.stroke line.color
                     , Svg.Attributes.strokeWidth "3"
                     , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d (pointsToPath line.value)
+                    , Svg.Attributes.d line.value
                     ]
                     []
             )
-            (stateToPaths config state)
+            (draw config state)
         )

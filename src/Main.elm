@@ -74,6 +74,11 @@ type alias Selector =
     }
 
 
+selectorBar : Selector -> ( Float, Float )
+selectorBar { from, area } =
+    ( from, from + area )
+
+
 type alias Model =
     { selector : Selector
     , dragging : Dragging
@@ -88,6 +93,8 @@ init json =
         chart =
             Data.decode json
 
+        initialSelector = Selector 0 1
+
         initialFoo =
             case chart of
                 Err _ ->
@@ -95,7 +102,8 @@ init json =
                         identity
                         identity
                         1000
-                        ( 460, 460 )
+                        { width = 460, height = 460 }
+                        (selectorBar initialSelector)
                         []
                         Dict.empty
 
@@ -104,11 +112,12 @@ init json =
                         (toFloat << Time.posixToMillis)
                         toFloat
                         500
-                        ( 460, 460 )
+                        { width = 460, height = 460 }
+                        (selectorBar initialSelector)
                         axisX
                         lines
     in
-    ( { selector = Selector 0 1
+    ( { selector = initialSelector
       , dragging = NoDragging
       , chart = Data.decode json
       , foo = initialFoo
@@ -155,21 +164,13 @@ update msg model =
             in
             ( { model
                 | selector = nextSelector
-                , foo = Foo.select ( nextSelector.from, nextSelector.from + nextSelector.area ) model.foo
+                , foo = Foo.select (selectorBar nextSelector) model.foo
               }
             , Cmd.none
             )
 
-        DragEndSelector end ->
-            let
-                nextSelector =
-                    Maybe.withDefault model.selector (applyDragging model.dragging end)
-            in
-            ( { model
-                | dragging = NoDragging
-                , selector = nextSelector
-                , foo = Foo.select ( nextSelector.from, nextSelector.from + nextSelector.area ) model.foo
-              }
+        DragEndSelector _ ->
+            ( { model | dragging = NoDragging }
             , Cmd.none
             )
 
