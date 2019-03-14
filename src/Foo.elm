@@ -254,11 +254,6 @@ type Approximation a
     | ToRight a
 
 
-approximate : (value -> value -> value) -> List value -> List ( key, value ) -> List ( key, value )
-approximate approximator =
-    List.map2 (\target ( key, value ) -> ( key, approximator value target ))
-
-
 consToTimeline : (Float -> Float) -> Float -> ( Maybe ( Float, Float ), List Float ) -> ( Maybe ( Float, Float ), List Float )
 consToTimeline bar newX ( limits, acc ) =
     ( case limits of
@@ -274,12 +269,17 @@ consToTimeline bar newX ( limits, acc ) =
 consToLines :
     (Float -> Float)
     -> List ( String, Float )
-    -> ( ( Float, Float ), Dict String (List ( Float, Maybe Float )) )
-    -> ( ( Float, Float ), Dict String (List ( Float, Maybe Float )) )
+    -> ( Maybe ( Float, Float ), Dict String (List ( Float, Maybe Float )) )
+    -> ( Maybe ( Float, Float ), Dict String (List ( Float, Maybe Float )) )
 consToLines bar newValues prev =
     List.foldr
         (\( key, value ) ( limits, lines ) ->
-            ( Tuple.mapBoth (min value) (max value) limits
+            ( case limits of
+                Nothing ->
+                    Just ( value, value )
+
+                Just ( minY, maxY ) ->
+                    Just ( min value minY, max value maxY )
             , Dict.update key
                 (\result ->
                     case result of
@@ -294,6 +294,11 @@ consToLines bar newValues prev =
         )
         prev
         newValues
+
+
+approximate : (value -> value -> value) -> List value -> List ( key, value ) -> List ( key, value )
+approximate approximator =
+    List.map2 (\target ( key, value ) -> ( key, approximator value target ))
 
 
 foo : ( Float, Float ) -> Config -> Data -> State -> State
@@ -443,7 +448,7 @@ foo ( from, to ) config data state =
                 )
                 ( 0
                 , { selectedTimeline = ( Nothing, [] )
-                  , selectedValues = ( ( 0, 0 ), Dict.empty )
+                  , selectedValues = ( Nothing, Dict.empty )
                   , approximation = NotApproximate
                   }
                 )
