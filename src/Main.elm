@@ -111,7 +111,7 @@ init json =
                     Foo.init
                         (toFloat << Time.posixToMillis)
                         toFloat
-                        500
+                        1000
                         { width = 460, height = 460 }
                         (selectorBar initialSelector)
                         axisX

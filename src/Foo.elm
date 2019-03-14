@@ -159,7 +159,7 @@ draw config state =
                 timeline
                 lines
 
-        Animation countdown limitsStart limitsEnd timeline lines ->
+        Animation countdown ( minimumStartY, maximumStartY ) limitsEnd timeline lines ->
             let
                 scaleX =
                     if limitsEnd.minimumX == limitsEnd.maximumX then
@@ -169,11 +169,11 @@ draw config state =
                         toFloat config.viewBox.width / (limitsEnd.maximumX - limitsEnd.minimumX)
 
                 scaleStartY =
-                    if limitsStart.minimumY == limitsStart.maximumY then
+                    if minimumStartY == maximumStartY then
                         0
 
                     else
-                        toFloat config.viewBox.height / (limitsStart.maximumY - limitsStart.minimumY)
+                        toFloat config.viewBox.height / (maximumStartY - minimumStartY)
 
                 scaleEndY =
                     if limitsEnd.minimumY == limitsEnd.maximumY then
@@ -230,7 +230,7 @@ type alias Limits =
 type State
     = Empty
     | Static Limits Timeline Lines
-    | Animation Float Limits Limits Timeline Lines
+    | Animation Float ( Float, Float ) Limits Timeline Lines
 
 
 type Model
@@ -240,21 +240,24 @@ type Model
 init : (x -> Float) -> (y -> Float) -> Float -> ViewBox -> ( Float, Float ) -> List x -> Dict String (Line (List y)) -> Model
 init mapX mapY duration viewBox selector timeline lines =
     let
-        initialData =
+        config =
+            Config duration viewBox
+
+        data =
             Data
                 (List.length timeline)
                 (List.map mapX timeline)
                 (Dict.map (\_ -> map (List.map mapY)) lines)
     in
     Model
-        (Config duration viewBox)
-        initialData
-        (foo selector duration initialData Empty)
+        config
+        data
+        (foo selector config data Empty)
 
 
 select : ( Float, Float ) -> Model -> Model
 select range (Model config data state) =
-    Model config data (foo range config.duration data state)
+    Model config data (foo range config data state)
 
 
 consToTimeline : Float -> ( Maybe ( Float, Float ), Timeline ) -> ( Maybe ( Float, Float ), Timeline )
@@ -388,8 +391,8 @@ fooHelp from to boundary x values acc =
         { acc | approximation = ToLeft ( boundary, x, List.map Tuple.second values ) }
 
 
-foo : ( Float, Float ) -> Float -> Data -> State -> State
-foo ( from, to ) duration data state =
+foo : ( Float, Float ) -> Config -> Data -> State -> State
+foo ( from, to ) config data state =
     let
         to_ =
             clamp 0 1 to
@@ -427,16 +430,72 @@ foo ( from, to ) duration data state =
             (Tuple.second k.selectedValues)
             data.lines
             (Just Dict.empty)
-        , Tuple.first k.selectedTimeline
-        , Tuple.first k.selectedValues
+        , Maybe.map2
+            (\( minimumX, maximumX ) ( minimumY, maximumY ) ->
+                Limits minimumX maximumX (min 0 minimumY) (max 0 maximumY)
+            )
+            (Tuple.first k.selectedTimeline)
+            (Tuple.first k.selectedValues)
         )
     of
-        ( Just nextCorrectLines, Just ( minimumX, maximumX ), Just ( minimumY, maximumY ) ) ->
-            Animation duration
-                (Limits minimumX maximumX 0 0)
-                (Limits minimumX maximumX (min 0 minimumY) (max 0 maximumY))
-                (Tuple.second k.selectedTimeline)
-                nextCorrectLines
+        ( Just nextCorrectLines, Just limits ) ->
+            case state of
+                Empty ->
+                    Animation config.duration
+                        ( 0, 0 )
+                        limits
+                        (Tuple.second k.selectedTimeline)
+                        nextCorrectLines
+
+                Static prevLimits _ _ ->
+                    if limits.minimumY == prevLimits.minimumY && limits.maximumY == prevLimits.maximumY then
+                        Static limits (Tuple.second k.selectedTimeline) nextCorrectLines
+
+                    else
+                        Animation config.duration
+                            ( prevLimits.minimumY, prevLimits.maximumY )
+                            limits
+                            (Tuple.second k.selectedTimeline)
+                            nextCorrectLines
+
+                Animation countdown ( minimumStartY, maximumStartY ) limitsEnd timeline lines ->
+                    if limits.minimumY == limitsEnd.minimumY && limits.maximumY == limitsEnd.maximumY then
+                        Animation countdown
+                            ( minimumStartY, maximumStartY )
+                            limits
+                            (Tuple.second k.selectedTimeline)
+                            nextCorrectLines
+
+                    else
+                        let
+                            scaleStartY =
+                                if minimumStartY == maximumStartY then
+                                    0
+
+                                else
+                                    toFloat config.viewBox.height / (maximumStartY - minimumStartY)
+
+                            scaleEndY =
+                                if limitsEnd.minimumY == limitsEnd.maximumY then
+                                    0
+
+                                else
+                                    toFloat config.viewBox.height / (limitsEnd.maximumY - limitsEnd.minimumY)
+
+                            done =
+                                easeOutQuad (1 - countdown / config.duration)
+
+                            prevMinimumY =
+                                minimumStartY + (limitsEnd.minimumY - minimumStartY) * done
+
+                            prevMaximumY =
+                                maximumStartY + (limitsEnd.maximumY - maximumStartY) * done
+                        in
+                        Animation config.duration
+                            ( prevMinimumY, prevMaximumY )
+                            limits
+                            (Tuple.second k.selectedTimeline)
+                            nextCorrectLines
 
         _ ->
             Empty
@@ -460,14 +519,14 @@ update msg (Model config data state) =
     case msg of
         Tick delta ->
             case state of
-                Animation countdown limitsStart limitsEnd timeline chart ->
+                Animation countdown limitsStart limitsEnd timeline lines ->
                     if delta >= countdown then
-                        Static limitsEnd timeline chart
+                        Static limitsEnd timeline lines
                             |> Model config data
                             |> Updated
 
                     else
-                        Animation (countdown - delta) limitsStart limitsEnd timeline chart
+                        Animation (countdown - delta) limitsStart limitsEnd timeline lines
                             |> Model config data
                             |> Updated
 
