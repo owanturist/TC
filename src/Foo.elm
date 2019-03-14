@@ -44,7 +44,8 @@ type alias Lines =
 
 
 type alias Data =
-    { timeline : Timeline
+    { size : Int
+    , timeline : Timeline
     , lines : Lines
     }
 
@@ -236,11 +237,14 @@ type Model
     = Model Config Data State
 
 
-init : (x -> Float) -> (y -> Float) -> Float -> ViewBox -> (Float, Float) -> List x -> Dict String (Line (List y)) -> Model
+init : (x -> Float) -> (y -> Float) -> Float -> ViewBox -> ( Float, Float ) -> List x -> Dict String (Line (List y)) -> Model
 init mapX mapY duration viewBox selector timeline lines =
     let
         initialData =
-            Data (List.map mapX timeline) (Dict.map (\_ -> map (List.map mapY)) lines)
+            Data
+                (List.length timeline)
+                (List.map mapX timeline)
+                (Dict.map (\_ -> map (List.map mapY)) lines)
     in
     Model
         (Config duration viewBox)
@@ -315,7 +319,7 @@ foo ( from, to ) duration data state =
             clamp 0 to_ from
 
         lastIndex =
-            toFloat (List.length data.timeline - 1)
+            toFloat (data.size - 1)
 
         ( _, k ) =
             -- it builds timeline and Line.value in reversed order
