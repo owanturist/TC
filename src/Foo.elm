@@ -318,19 +318,23 @@ type alias Foo =
 
 fooHelp : Float -> Float -> Float -> Float -> List ( String, Float ) -> Foo -> Foo
 fooHelp from to boundary x values acc =
+    let
+        approximatorLeft prevBoundary current prev =
+            prev + (current - prev) * (from - prevBoundary) / (boundary - prevBoundary)
+
+        approximatorRight prevBoundary current prev =
+            prev + (current - prev) * (to - prevBoundary) / (boundary - prevBoundary)
+    in
     if from <= boundary then
         if boundary <= to then
             case acc.approximation of
                 ToLeft ( prevBoundary, prevX, prevValues ) ->
                     let
-                        approximator current prev =
-                            prev + (current - prev) * (from - prevBoundary) / (boundary - prevBoundary)
-
                         approximatedX =
-                            approximator x prevX
+                            approximatorLeft prevBoundary x prevX
 
                         approximatedValues =
-                            approximate approximator prevValues values
+                            approximate (approximatorLeft prevBoundary) prevValues values
                     in
                     { selectedTimeline = consToTimeline x (consToTimeline approximatedX acc.selectedTimeline)
                     , selectedValues = consToLines values (consToLines approximatedValues acc.selectedValues)
@@ -350,23 +354,17 @@ fooHelp from to boundary x values acc =
 
                 ToLeft ( prevBoundary, prevX, prevValues ) ->
                     let
-                        approximatorLeft current prev =
-                            prev + (current - prev) * (from - prevBoundary) / (boundary - prevBoundary)
-
-                        approximatorRight current prev =
-                            prev + (current - prev) * (to - prevBoundary) / (boundary - prevBoundary)
-
                         aproximatedLeftX =
-                            approximatorLeft x prevX
+                            approximatorLeft prevBoundary x prevX
 
                         aproximatedRightX =
-                            approximatorRight x prevX
+                            approximatorRight prevBoundary x prevX
 
                         approximatedLeftValues =
-                            approximate approximatorLeft prevValues values
+                            approximate (approximatorLeft prevBoundary) prevValues values
 
                         approximatedRightValues =
-                            approximate approximatorRight prevValues values
+                            approximate (approximatorRight prevBoundary) prevValues values
                     in
                     { selectedTimeline = List.foldr consToTimeline acc.selectedTimeline [ aproximatedRightX, aproximatedLeftX ]
                     , selectedValues = List.foldr consToLines acc.selectedValues [ approximatedRightValues, approximatedLeftValues ]
@@ -375,14 +373,11 @@ fooHelp from to boundary x values acc =
 
                 ToRight ( prevBoundary, prevX, prevValues ) ->
                     let
-                        approximator current prev =
-                            prev + (current - prev) * (to - prevBoundary) / (boundary - prevBoundary)
-
                         approximatedX =
-                            approximator x prevX
+                            approximatorRight prevBoundary x prevX
 
                         approximatedValues =
-                            approximate approximator prevValues values
+                            approximate (approximatorRight prevBoundary) prevValues values
                     in
                     { selectedTimeline = consToTimeline approximatedX acc.selectedTimeline
                     , selectedValues = consToLines approximatedValues acc.selectedValues
