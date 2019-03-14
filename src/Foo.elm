@@ -257,12 +257,6 @@ select range (Model config data state) =
     Model config data (foo range config.duration data state)
 
 
-type Approximation a
-    = NotApproximate
-    | ToLeft a
-    | ToRight a
-
-
 consToTimeline : Float -> ( Maybe ( Float, Float ), Timeline ) -> ( Maybe ( Float, Float ), Timeline )
 consToTimeline newX ( limits, acc ) =
     ( case limits of
@@ -309,6 +303,96 @@ approximate approximator =
     List.map2 (\target ( key, value ) -> ( key, approximator value target ))
 
 
+type Approximation a
+    = NotApproximate
+    | ToLeft a
+    | ToRight a
+
+
+type alias Foo =
+    { selectedTimeline : ( Maybe ( Float, Float ), Timeline )
+    , selectedValues : ( Maybe ( Float, Float ), Dict String (List Float) )
+    , approximation : Approximation ( Float, Float, List Float )
+    }
+
+
+fooHelp : Float -> Float -> Float -> Float -> List ( String, Float ) -> Foo -> Foo
+fooHelp from to boundary x values acc =
+    if from <= boundary then
+        if boundary <= to then
+            case acc.approximation of
+                ToLeft ( prevBoundary, prevX, prevValues ) ->
+                    let
+                        approximator current prev =
+                            prev + (current - prev) * (from - prevBoundary) / (boundary - prevBoundary)
+
+                        approximatedX =
+                            approximator x prevX
+
+                        approximatedValues =
+                            approximate approximator prevValues values
+                    in
+                    { selectedTimeline = consToTimeline x (consToTimeline approximatedX acc.selectedTimeline)
+                    , selectedValues = consToLines values (consToLines approximatedValues acc.selectedValues)
+                    , approximation = ToRight ( boundary, x, List.map Tuple.second values )
+                    }
+
+                _ ->
+                    { selectedTimeline = consToTimeline x acc.selectedTimeline
+                    , selectedValues = consToLines values acc.selectedValues
+                    , approximation = ToRight ( boundary, x, List.map Tuple.second values )
+                    }
+
+        else
+            case acc.approximation of
+                NotApproximate ->
+                    acc
+
+                ToLeft ( prevBoundary, prevX, prevValues ) ->
+                    let
+                        approximatorLeft current prev =
+                            prev + (current - prev) * (from - prevBoundary) / (boundary - prevBoundary)
+
+                        approximatorRight current prev =
+                            prev + (current - prev) * (to - prevBoundary) / (boundary - prevBoundary)
+
+                        aproximatedLeftX =
+                            approximatorLeft x prevX
+
+                        aproximatedRightX =
+                            approximatorRight x prevX
+
+                        approximatedLeftValues =
+                            approximate approximatorLeft prevValues values
+
+                        approximatedRightValues =
+                            approximate approximatorRight prevValues values
+                    in
+                    { selectedTimeline = List.foldr consToTimeline acc.selectedTimeline [ aproximatedRightX, aproximatedLeftX ]
+                    , selectedValues = List.foldr consToLines acc.selectedValues [ approximatedRightValues, approximatedLeftValues ]
+                    , approximation = NotApproximate
+                    }
+
+                ToRight ( prevBoundary, prevX, prevValues ) ->
+                    let
+                        approximator current prev =
+                            prev + (current - prev) * (to - prevBoundary) / (boundary - prevBoundary)
+
+                        approximatedX =
+                            approximator x prevX
+
+                        approximatedValues =
+                            approximate approximator prevValues values
+                    in
+                    { selectedTimeline = consToTimeline approximatedX acc.selectedTimeline
+                    , selectedValues = consToLines approximatedValues acc.selectedValues
+                    , approximation = NotApproximate
+                    }
+
+    else
+        { acc | approximation = ToLeft ( boundary, x, List.map Tuple.second values ) }
+
+
 foo : ( Float, Float ) -> Float -> Data -> State -> State
 foo ( from, to ) duration data state =
     let
@@ -325,84 +409,8 @@ foo ( from, to ) duration data state =
             -- it builds timeline and Line.value in reversed order
             foldl
                 (\x values ( index, acc ) ->
-                    let
-                        boundary =
-                            index / lastIndex
-                    in
                     ( index + 1
-                    , if from_ <= boundary then
-                        if boundary <= to_ then
-                            case acc.approximation of
-                                ToLeft ( prevBoundary, prevX, prevValues ) ->
-                                    let
-                                        approximator current prev =
-                                            prev + (current - prev) * (from_ - prevBoundary) / (boundary - prevBoundary)
-
-                                        approximatedX =
-                                            approximator x prevX
-
-                                        approximatedValues =
-                                            approximate approximator prevValues values
-                                    in
-                                    { selectedTimeline = consToTimeline x (consToTimeline approximatedX acc.selectedTimeline)
-                                    , selectedValues = consToLines values (consToLines approximatedValues acc.selectedValues)
-                                    , approximation = ToRight ( boundary, x, List.map Tuple.second values )
-                                    }
-
-                                _ ->
-                                    { selectedTimeline = consToTimeline x acc.selectedTimeline
-                                    , selectedValues = consToLines values acc.selectedValues
-                                    , approximation = ToRight ( boundary, x, List.map Tuple.second values )
-                                    }
-
-                        else
-                            case acc.approximation of
-                                NotApproximate ->
-                                    acc
-
-                                ToLeft ( prevBoundary, prevX, prevValues ) ->
-                                    let
-                                        approximatorLeft current prev =
-                                            prev + (current - prev) * (from_ - prevBoundary) / (boundary - prevBoundary)
-
-                                        approximatorRight current prev =
-                                            prev + (current - prev) * (to_ - prevBoundary) / (boundary - prevBoundary)
-
-                                        aproximatedLeftX =
-                                            approximatorLeft x prevX
-
-                                        aproximatedRightX =
-                                            approximatorRight x prevX
-
-                                        approximatedLeftValues =
-                                            approximate approximatorLeft prevValues values
-
-                                        approximatedRightValues =
-                                            approximate approximatorRight prevValues values
-                                    in
-                                    { selectedTimeline = List.foldr consToTimeline acc.selectedTimeline [ aproximatedRightX, aproximatedLeftX ]
-                                    , selectedValues = List.foldr consToLines acc.selectedValues [ approximatedRightValues, approximatedLeftValues ]
-                                    , approximation = NotApproximate
-                                    }
-
-                                ToRight ( prevBoundary, prevX, prevValues ) ->
-                                    let
-                                        approximator current prev =
-                                            prev + (current - prev) * (to_ - prevBoundary) / (boundary - prevBoundary)
-
-                                        approximatedX =
-                                            approximator x prevX
-
-                                        approximatedValues =
-                                            approximate approximator prevValues values
-                                    in
-                                    { selectedTimeline = consToTimeline approximatedX acc.selectedTimeline
-                                    , selectedValues = consToLines approximatedValues acc.selectedValues
-                                    , approximation = NotApproximate
-                                    }
-
-                      else
-                        { acc | approximation = ToLeft ( boundary, x, List.map Tuple.second values ) }
+                    , fooHelp from to (index / lastIndex) x values acc
                     )
                 )
                 ( 0
