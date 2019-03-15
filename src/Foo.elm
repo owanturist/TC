@@ -114,10 +114,10 @@ drawStep mapX mapY timeline points =
 
                         y :: nextY ->
                             ( nextY
-                            , acc ++ "L" ++ coordinate (mapX x) (mapY -y)
+                            , acc ++ "L" ++ coordinate (mapX x) (mapY y)
                             )
                 )
-                ( restY, "M" ++ coordinate (mapX firstX) (mapY -firstY) )
+                ( restY, "M" ++ coordinate (mapX firstX) (mapY firstY) )
                 restX
                 |> Tuple.second
 
@@ -161,7 +161,7 @@ draw config state =
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
-                (\y -> scaleY * y)
+                (\y -> scaleY * (limitsY.min - y))
                 timeline
                 lines
 
@@ -174,26 +174,21 @@ draw config state =
                     else
                         toFloat config.viewBox.width / (limitsX.max - limitsX.min)
 
-                scaleYStart =
-                    if limitsYStart.min == limitsYStart.max then
-                        0
+                done =
+                    easeOutQuad (1 - countdown / config.duration)
 
-                    else
-                        toFloat config.viewBox.height / (limitsYStart.max - limitsYStart.min)
+                mn =
+                    limitsYStart.min * limitsYEnd.min / (limitsYEnd.min + (limitsYStart.min - limitsYEnd.min) * done)
 
-                scaleYEnd =
-                    if limitsYEnd.min == limitsYEnd.max then
-                        0
+                mx =
+                    limitsYStart.max * limitsYEnd.max / (limitsYEnd.max + (limitsYStart.max - limitsYEnd.max) * done)
 
-                    else
-                        toFloat config.viewBox.height / (limitsYEnd.max - limitsYEnd.min)
-
-                scaleY =
-                    scaleYStart + (scaleYEnd - scaleYStart) * easeOutQuad (1 - countdown / config.duration)
+                yR2 y =
+                    toFloat config.viewBox.height * (y - mn) / (mn - mx)
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
-                (\y -> scaleY * y)
+                yR2
                 timeline
                 lines
 
@@ -414,18 +409,14 @@ selectHelp ( from, to ) config data state =
             data.lines
             (Just Dict.empty)
         , Tuple.first selectedTimeline
-        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
+          -- , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
+        , Tuple.first selectedValues
         )
     of
         ( Just nextCorrectLines, Just limitsX, Just limitsY ) ->
             case state of
                 Empty ->
-                    Animation config.duration
-                        limitsX
-                        (Limits 0 0)
-                        limitsY
-                        (Tuple.second selectedTimeline)
-                        nextCorrectLines
+                    Static limitsX limitsY (Tuple.second selectedTimeline) nextCorrectLines
 
                 Static _ prevLimitsY _ _ ->
                     if prevLimitsY == limitsY then
@@ -453,16 +444,16 @@ selectHelp ( from, to ) config data state =
                             done =
                                 easeOutQuad (1 - countdown / config.duration)
 
-                            deltaYStart =
-                                limitsYStart.max - limitsYStart.min
+                            mn =
+                                limitsYStart.min * limitsYEnd.min / (limitsYEnd.min + (limitsYStart.min - limitsYEnd.min) * done)
 
-                            deltaYEnd =
-                                limitsYEnd.max - limitsYEnd.min
+                            mx =
+                                limitsYStart.max * limitsYEnd.max / (limitsYEnd.max + (limitsYStart.max - limitsYEnd.max) * done)
                         in
                         Animation config.duration
                             limitsX
-                            { min = limitsYStart.min
-                            , max = deltaYStart * deltaYEnd / (deltaYEnd + (deltaYStart - deltaYEnd) * done)
+                            { min = mn
+                            , max = mx
                             }
                             limitsY
                             (Tuple.second selectedTimeline)
@@ -525,12 +516,9 @@ subscriptions (Model config data state) =
 
 makeViewBox : ViewBox -> String
 makeViewBox { width, height } =
-    String.join " "
-        [ "0"
-        , String.fromInt -height
-        , String.fromInt width
-        , String.fromInt height
-        ]
+    [ 0, -height, width, height ]
+        |> List.map String.fromInt
+        |> String.join " "
 
 
 view : Model -> Svg msg
