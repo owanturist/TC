@@ -5,6 +5,7 @@ import Data
 import Dict exposing (Dict)
 import Svg exposing (Svg, path, svg)
 import Svg.Attributes
+import Svg.Keyed
 
 
 type alias Limits =
@@ -439,15 +440,20 @@ view config (Model settings chart state) =
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         ]
-        (List.map
-            (\line ->
-                path
-                    [ Svg.Attributes.stroke line.color
-                    , Svg.Attributes.strokeWidth "1.5"
-                    , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d line.value
-                    ]
-                    []
+        [ Svg.Keyed.node "g"
+            []
+            (List.map
+                (\line ->
+                    ( line.id
+                    , path
+                        [ Svg.Attributes.stroke line.color
+                        , Svg.Attributes.strokeWidth "1.5"
+                        , Svg.Attributes.fill "none"
+                        , Svg.Attributes.d line.value
+                        ]
+                        []
+                    )
+                )
+                (draw config settings state)
             )
-            (draw config settings state)
-        )
+        ]
