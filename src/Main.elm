@@ -1,89 +1,18 @@
 module Main exposing (main)
 
 import Browser
-import DOM
 import Data
-import Dict exposing (Dict)
 import Foo
-import Html exposing (Html, div, text)
-import Html.Attributes as Attributes
-import Html.Events as Events
-import Html.Lazy as Lazy
-import Json.Decode as Decode exposing (Decoder, Value)
-import Svg exposing (Svg, path, svg)
-import Svg.Attributes
-import Task
+import Html
 import Time
-import Utils.DOM
-
+import Json.Decode as Decode exposing (Value)
 
 
 -- M O D E L
 
 
-type Dragging
-    = NoDragging
-    | SelectorFromChanging Selector Float Float
-    | SelectorToChanging Selector Float Float
-    | SelectorAreaChanging Selector Float Float
-
-
-applyDragging : Dragging -> Float -> Maybe Selector
-applyDragging dragging end =
-    case dragging of
-        NoDragging ->
-            Nothing
-
-        SelectorFromChanging { from, area } start width ->
-            let
-                -- keep minumun 48px (converted to pct) width for dragging
-                delta =
-                    clamp -from (area - 48 / width) ((end - start) / width)
-            in
-            Just
-                { from = from + delta
-                , area = area - delta
-                }
-
-        SelectorToChanging { from, area } start width ->
-            let
-                -- keep minumun 48px (converted to pct) width for dragging
-                delta =
-                    clamp (-area + 48 / width) (1 - from - area) ((end - start) / width)
-            in
-            Just
-                { from = from
-                , area = area + delta
-                }
-
-        SelectorAreaChanging { from, area } start width ->
-            let
-                delta =
-                    clamp -from (1 - from - area) ((end - start) / width)
-            in
-            Just
-                { from = from + delta
-                , area = area
-                }
-
-
-type alias Selector =
-    { from : Float
-    , area : Float
-    }
-
-
-selectorBar : Selector -> ( Float, Float )
-selectorBar { from, area } =
-    ( from, from + area )
-
-
 type alias Model =
-    { selector : Selector
-    , dragging : Dragging
-    , chart : Data.Chart Time.Posix Int
-    , foo : Foo.Model
-    }
+    Foo.Model
 
 
 init : Value -> ( Model, Cmd Msg )
@@ -93,24 +22,15 @@ init json =
             Debug.todo (Decode.errorToString err)
 
         Ok chart ->
-            let
-                initialSelector =
-                    Selector 0 1
-            in
-            ( { selector = initialSelector
-              , dragging = NoDragging
-              , chart = chart
-              , foo =
-                    Foo.init (selectorBar initialSelector)
-                        { animation =
-                            { duration = 2000
-                            }
-                        }
-                        (chart
-                            |> Data.mapChartX (toFloat << Time.posixToMillis)
-                            |> Data.mapChartY toFloat
-                        )
-              }
+            ( Foo.init
+                { animation =
+                    { duration = 2000
+                    }
+                }
+                (chart
+                    |> Data.mapChartX (toFloat << Time.posixToMillis)
+                    |> Data.mapChartY toFloat
+                )
             , Cmd.none
             )
 
@@ -120,53 +40,14 @@ init json =
 
 
 type Msg
-    = StartSelectorFromChanging Float Float
-    | StartSelectorToChanging Float Float
-    | StartSelectorAreaChanging Float Float
-    | DragSelector Float
-    | DragEndSelector Float
-    | FooMsg Foo.Msg
+    = FooMsg Foo.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
-    case msg of
-        StartSelectorFromChanging start width ->
-            ( { model | dragging = SelectorFromChanging model.selector start width }
-            , Cmd.none
-            )
-
-        StartSelectorToChanging start width ->
-            ( { model | dragging = SelectorToChanging model.selector start width }
-            , Cmd.none
-            )
-
-        StartSelectorAreaChanging start width ->
-            ( { model | dragging = SelectorAreaChanging model.selector start width }
-            , Cmd.none
-            )
-
-        DragSelector end ->
-            let
-                nextSelector =
-                    Maybe.withDefault model.selector (applyDragging model.dragging end)
-            in
-            ( { model
-                | selector = nextSelector
-                , foo = Foo.select (selectorBar nextSelector) model.foo
-              }
-            , Cmd.none
-            )
-
-        DragEndSelector _ ->
-            ( { model | dragging = NoDragging }
-            , Cmd.none
-            )
-
-        FooMsg msgOfFoo ->
-            ( { model | foo = Foo.update msgOfFoo model.foo }
-            , Cmd.none
-            )
+update (FooMsg msgOfFoo) model =
+    ( Foo.update msgOfFoo model
+    , Cmd.none
+    )
 
 
 
@@ -175,104 +56,17 @@ update msg model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Sub.map FooMsg (Foo.subscriptions model.foo)
+    Sub.map FooMsg (Foo.subscriptions model)
 
 
 
 -- V I E W
 
 
-stop : Decoder msg -> Decoder ( msg, Bool )
-stop decoder =
-    Decode.map (\msg -> ( msg, True )) decoder
-
-
-withTouchX : (Float -> Msg) -> Decoder Msg
-withTouchX tagger =
-    Decode.float
-        |> Decode.at [ "changedTouches", "0", "pageX" ]
-        |> Decode.map tagger
-
-
-withTouchXandSelectorWidth : (Float -> Float -> Msg) -> Decoder Msg
-withTouchXandSelectorWidth tagger =
-    Decode.map2 tagger
-        (Decode.field "pageX" Decode.float)
-        (Decode.float
-            |> Decode.field "clientWidth"
-            |> Utils.DOM.closest "main__overview-selector"
-            |> DOM.target
-        )
-        |> Decode.at [ "changedTouches", "0" ]
-
-
-pct : Float -> String
-pct value =
-    String.fromFloat value ++ "%"
-
-
-viewOverviewSelector : Selector -> Dragging -> Html Msg
-viewOverviewSelector selector dragging =
-    let
-        handlers =
-            case dragging of
-                NoDragging ->
-                    []
-
-                _ ->
-                    [ Events.on "touchmove" (withTouchX DragSelector)
-                    , Events.on "touchend" (withTouchX DragEndSelector)
-                    ]
-    in
-    div
-        (Attributes.class "main__overview-selector"
-            :: handlers
-        )
-        [ div
-            [ Attributes.class "main__overview-field"
-            , Attributes.style "width" (pct (100 * selector.from))
-            ]
-            []
-        , div
-            [ Attributes.class "main__overview-field main__overview-field_active"
-            , Attributes.style "width" (pct (100 * selector.area))
-            , Events.on "touchstart" (withTouchXandSelectorWidth StartSelectorAreaChanging)
-            ]
-            [ div
-                [ Attributes.class "main__overview-expander"
-                , Events.stopPropagationOn "touchstart" (stop (withTouchXandSelectorWidth StartSelectorFromChanging))
-                ]
-                []
-            , div
-                [ Attributes.class "main__overview-expander main__overview-expander_end"
-                , Events.stopPropagationOn "touchstart" (stop (withTouchXandSelectorWidth StartSelectorToChanging))
-                ]
-                []
-            ]
-        , div
-            [ Attributes.class "main__overview-field main__overview-field_end"
-            ]
-            []
-        ]
-
-
-viewContainer : List (Html msg) -> Html msg
-viewContainer children =
-    div [ Attributes.class "main__container" ] children
-
-
-view : Selector -> Dragging -> Html Msg
-view selector dragging =
-    div
-        [ Attributes.class "main"
-        ]
-        [ viewContainer
-            [ div
-                [ Attributes.class "main__overview"
-                ]
-                [ Lazy.lazy2 viewOverviewSelector selector dragging
-                ]
-            ]
+view : Model -> Browser.Document Msg
+view model =
+    Browser.Document "Charts"
+        [ Html.map FooMsg (Foo.view model)
         ]
 
 
@@ -286,16 +80,5 @@ main =
         { init = init
         , update = update
         , subscriptions = subscriptions
-        , view =
-            \model ->
-                Browser.Document "Charts"
-                    [ Foo.view
-                        { viewBox = { width = 460, height = 460 }
-                        }
-                        model.foo
-                        |> Html.map FooMsg
-                    , view
-                        model.selector
-                        model.dragging
-                    ]
+        , view = view
         }

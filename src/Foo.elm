@@ -1,11 +1,22 @@
-module Foo exposing (Config, Model, Msg, Settings, init, select, subscriptions, update, view)
+module Foo exposing (Model, Msg, Settings, init, subscriptions, update, view)
 
 import Browser.Events
+import DOM
 import Data
 import Dict exposing (Dict)
-import Svg exposing (Svg, path, svg)
+import Html exposing (Html, div)
+import Html.Attributes
+import Html.Events
+import Html.Lazy
+import Json.Decode as Decode exposing (Decoder)
+import Regex
+import Svg exposing (path, svg)
 import Svg.Attributes
 import Svg.Keyed
+
+
+
+-- M O D E L
 
 
 type alias Limits =
@@ -36,27 +47,82 @@ type alias Settings =
     }
 
 
+type alias Range =
+    { from : Float
+    , to : Float
+    }
+
+
+type Dragging
+    = NoDragging
+    | SelectorFromChanging Range Float Float
+    | SelectorToChanging Range Float Float
+    | SelectorAreaChanging Range Float Float
+
+
+applyDragging : Dragging -> Float -> Maybe Range
+applyDragging dragging end =
+    case dragging of
+        NoDragging ->
+            Nothing
+
+        SelectorFromChanging { from, to } start width ->
+            let
+                -- keep minumun 48px (converted to pct) width for dragging
+                delta =
+                    clamp -from ((to - from) - 48 / width) ((end - start) / width)
+            in
+            Just
+                { from = from + delta
+                , to = to
+                }
+
+        SelectorToChanging { from, to } start width ->
+            let
+                -- keep minumun 48px (converted to pct) width for dragging
+                delta =
+                    clamp ((from - to) + 48 / width) (1 - to) ((end - start) / width)
+            in
+            Just
+                { from = from
+                , to = to + delta
+                }
+
+        SelectorAreaChanging { from, to } start width ->
+            let
+                delta =
+                    clamp -from (1 - to) ((end - start) / width)
+            in
+            Just
+                { from = from + delta
+                , to = to + delta
+                }
+
+
 type Canvas
     = Empty
     | Static Limits Limits Timeline Lines
     | Animated Float Limits Limits Limits Timeline Lines
 
 
+type alias State =
+    { range : Range
+    , dragging : Dragging
+    , canvas : Canvas
+    }
+
+
 type Model
-    = Model Settings Chart Canvas
+    = Model Settings Chart State
 
 
-init : ( Float, Float ) -> Settings -> Chart -> Model
-init selector settings chart =
-    Model
-        settings
-        chart
-        (selectHelp selector settings chart Empty)
-
-
-select : ( Float, Float ) -> Model -> Model
-select range (Model settings chart canvas) =
-    Model settings chart (selectHelp range settings chart canvas)
+init : Settings -> Chart -> Model
+init settings chart =
+    let
+        initialRange =
+            Range 0 1
+    in
+    Model settings chart (State initialRange NoDragging (select initialRange settings chart Empty))
 
 
 consToTimeline : Float -> ( Maybe Limits, Timeline ) -> ( Maybe Limits, Timeline )
@@ -103,7 +169,7 @@ approximate approximator =
 
 
 type Approximation a
-    = NotApproximate
+    = NoApproximate
     | ToLeft a
     | ToRight a
 
@@ -115,8 +181,8 @@ type alias Selection =
     }
 
 
-selectStep : Float -> Float -> Float -> Float -> Float -> List ( String, Float ) -> Selection -> Selection
-selectStep from to firstX lastX x bunch acc =
+selectStep : Range -> Float -> Float -> Float -> List ( String, Float ) -> Selection -> Selection
+selectStep { from, to } firstX lastX x bunch acc =
     let
         position =
             (x - firstX) / (lastX - firstX)
@@ -151,7 +217,7 @@ selectStep from to firstX lastX x bunch acc =
 
         else
             case acc.approximation of
-                NotApproximate ->
+                NoApproximate ->
                     acc
 
                 ToLeft ( prevPosition, prevX, prevValues ) ->
@@ -170,7 +236,7 @@ selectStep from to firstX lastX x bunch acc =
                     in
                     { timeline = List.foldr consToTimeline acc.timeline [ aproximatedRightX, aproximatedLeftX ]
                     , values = List.foldr consToLines acc.values [ approximatedRightValues, approximatedLeftValues ]
-                    , approximation = NotApproximate
+                    , approximation = NoApproximate
                     }
 
                 ToRight ( prevPosition, prevX, prevValues ) ->
@@ -183,32 +249,26 @@ selectStep from to firstX lastX x bunch acc =
                     in
                     { timeline = consToTimeline approximatedX acc.timeline
                     , values = consToLines approximatedValues acc.values
-                    , approximation = NotApproximate
+                    , approximation = NoApproximate
                     }
 
     else
         { acc | approximation = ToLeft ( position, x, List.map Tuple.second bunch ) }
 
 
-selectHelp : ( Float, Float ) -> Settings -> Chart -> Canvas -> Canvas
-selectHelp ( from, to ) { animation } chart canvas =
+select : Range -> Settings -> Chart -> Canvas -> Canvas
+select range { animation } chart canvas =
     let
-        to_ =
-            clamp 0 1 to
-
-        from_ =
-            clamp 0 to_ from
-
         ( firstX, lastX ) =
             ( Data.firstChartX chart, Data.lastChartX chart )
 
         selection =
             -- it builds timeline and Line.value in reversed order, should be reversed again later
             Data.foldlChart
-                (selectStep from to firstX lastX)
+                (selectStep range firstX lastX)
                 { timeline = ( Nothing, [] )
                 , values = ( Nothing, Dict.empty )
-                , approximation = NotApproximate
+                , approximation = NoApproximate
                 }
                 chart
     in
@@ -273,25 +333,65 @@ selectHelp ( from, to ) { animation } chart canvas =
 
 
 type Msg
-    = Tick Float
+    = StartSelectorFromChanging Float Float
+    | StartSelectorToChanging Float Float
+    | StartSelectorAreaChanging Float Float
+    | DragSelector Float
+    | DragEndSelector Float
+    | Tick Float
 
 
 update : Msg -> Model -> Model
-update msg (Model settings chart canvas) =
+update msg (Model settings chart state) =
     case msg of
-        Tick delta ->
-            case canvas of
-                Animated countdown limitsX limitsYStart limitsYEnd timeline lines ->
-                    if delta >= countdown then
-                        Static limitsX limitsYEnd timeline lines
-                            |> Model settings chart
+        StartSelectorFromChanging start width ->
+            Model settings
+                chart
+                { state | dragging = SelectorFromChanging state.range start width }
 
-                    else
-                        Animated (countdown - delta) limitsX limitsYStart limitsYEnd timeline lines
-                            |> Model settings chart
+        StartSelectorToChanging start width ->
+            Model settings
+                chart
+                { state | dragging = SelectorToChanging state.range start width }
+
+        StartSelectorAreaChanging start width ->
+            Model settings
+                chart
+                { state | dragging = SelectorAreaChanging state.range start width }
+
+        DragSelector end ->
+            case applyDragging state.dragging end of
+                Nothing ->
+                    Model settings chart state
+
+                Just nextRange ->
+                    Model settings
+                        chart
+                        { state
+                            | range = nextRange
+                            , canvas = select nextRange settings chart state.canvas
+                        }
+
+        DragEndSelector _ ->
+            Model settings
+                chart
+                { state | dragging = NoDragging }
+
+        Tick delta ->
+            case state.canvas of
+                Animated countdown limitsX limitsYStart limitsYEnd timeline lines ->
+                    let
+                        nextCanvas =
+                            if delta >= countdown then
+                                Static limitsX limitsYEnd timeline lines
+
+                            else
+                                Animated (countdown - delta) limitsX limitsYStart limitsYEnd timeline lines
+                    in
+                    Model settings chart { state | canvas = nextCanvas }
 
                 _ ->
-                    Model settings chart canvas
+                    Model settings chart state
 
 
 
@@ -299,8 +399,8 @@ update msg (Model settings chart canvas) =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions (Model settings chart canvas) =
-    case canvas of
+subscriptions (Model _ _ state) =
+    case state.canvas of
         Animated _ _ _ _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
 
@@ -318,9 +418,79 @@ type alias ViewBox =
     }
 
 
+makeViewBox : ViewBox -> String
+makeViewBox { width, height } =
+    [ 0, 0, width, height ]
+        |> List.map String.fromInt
+        |> String.join " "
+
+
 type alias Config =
     { viewBox : ViewBox
     }
+
+
+config : Config
+config =
+    Config (ViewBox 460 460)
+
+
+containsClass : String -> String -> Bool
+containsClass x className =
+    case
+        Regex.fromStringWith
+            { caseInsensitive = False
+            , multiline = False
+            }
+            ("(^|\\s+)" ++ x ++ "($|\\s+)")
+    of
+        Nothing ->
+            False
+
+        Just regex ->
+            Regex.contains regex className
+
+
+closest : String -> Decoder node -> Decoder node
+closest class decoder =
+    Decode.andThen
+        (\className ->
+            if containsClass class className then
+                decoder
+
+            else
+                DOM.parentElement (closest class decoder)
+        )
+        DOM.className
+
+
+stop : Decoder msg -> Decoder ( msg, Bool )
+stop decoder =
+    Decode.map (\msg -> ( msg, True )) decoder
+
+
+withTouchX : (Float -> msg) -> Decoder msg
+withTouchX tagger =
+    Decode.float
+        |> Decode.at [ "changedTouches", "0", "pageX" ]
+        |> Decode.map tagger
+
+
+withTouchXandSelectorWidth : (Float -> Float -> Msg) -> Decoder Msg
+withTouchXandSelectorWidth tagger =
+    Decode.map2 tagger
+        (Decode.field "pageX" Decode.float)
+        (Decode.float
+            |> Decode.field "clientWidth"
+            |> closest "main__overview-selector"
+            |> DOM.target
+        )
+        |> Decode.at [ "changedTouches", "0" ]
+
+
+pct : Float -> String
+pct value =
+    String.fromFloat value ++ "%"
 
 
 coordinate : Float -> Float -> String
@@ -363,13 +533,22 @@ easeOutQuad delta =
     delta * (2 - delta)
 
 
+calcScale : Int -> Float -> Float -> Float
+calcScale side min max =
+    if min == max then
+        0
+
+    else
+        toFloat side / (max - min)
+
+
 calcDoneLimit : Float -> Float -> Float -> Float
 calcDoneLimit start end done =
     start + (end - start) * done
 
 
-draw : Config -> Settings -> Canvas -> List (Data.Line String)
-draw { viewBox } { animation } canvas =
+draw : Settings -> Canvas -> List (Data.Line String)
+draw { animation } canvas =
     case canvas of
         Empty ->
             []
@@ -377,18 +556,10 @@ draw { viewBox } { animation } canvas =
         Static limitsX limitsY timeline lines ->
             let
                 scaleX =
-                    if limitsX.min == limitsX.max then
-                        0
-
-                    else
-                        toFloat viewBox.width / (limitsX.max - limitsX.min)
+                    calcScale config.viewBox.width limitsX.min limitsX.max
 
                 scaleY =
-                    if limitsY.min == limitsY.max then
-                        0
-
-                    else
-                        toFloat viewBox.height / (limitsY.max - limitsY.min)
+                    calcScale config.viewBox.height limitsY.min limitsY.max
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
@@ -399,11 +570,7 @@ draw { viewBox } { animation } canvas =
         Animated countdown limitsX limitsYStart limitsYEnd timeline lines ->
             let
                 scaleX =
-                    if limitsX.min == limitsX.max then
-                        0
-
-                    else
-                        toFloat viewBox.width / (limitsX.max - limitsX.min)
+                    calcScale config.viewBox.width limitsX.min limitsX.max
 
                 done =
                     easeOutQuad (1 - countdown / animation.duration)
@@ -415,11 +582,7 @@ draw { viewBox } { animation } canvas =
                     calcDoneLimit limitsYStart.max limitsYEnd.max done
 
                 scaleY =
-                    if limitYMax == limitYMin then
-                        0
-
-                    else
-                        toFloat viewBox.height / (limitYMax - limitYMin)
+                    calcScale config.viewBox.height limitYMin limitYMax
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
@@ -428,32 +591,74 @@ draw { viewBox } { animation } canvas =
                 lines
 
 
-makeViewBox : ViewBox -> String
-makeViewBox { width, height } =
-    [ 0, 0, width, height ]
-        |> List.map String.fromInt
-        |> String.join " "
+viewOverviewSelector : Range -> Dragging -> Html Msg
+viewOverviewSelector range dragging =
+    let
+        handlers =
+            case dragging of
+                NoDragging ->
+                    []
 
-
-view : Config -> Model -> Svg msg
-view config (Model settings chart canvas) =
-    svg
-        [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
-        ]
-        [ Svg.Keyed.node "g"
+                _ ->
+                    [ Html.Events.on "touchmove" (withTouchX DragSelector)
+                    , Html.Events.on "touchend" (withTouchX DragEndSelector)
+                    ]
+    in
+    div
+        (Html.Attributes.class "main__overview-selector"
+            :: handlers
+        )
+        [ div
+            [ Html.Attributes.class "main__overview-field"
+            , Html.Attributes.style "width" (pct (100 * range.from))
+            ]
             []
-            (List.map
-                (\line ->
-                    ( line.id
-                    , path
-                        [ Svg.Attributes.stroke line.color
-                        , Svg.Attributes.strokeWidth "1.5"
-                        , Svg.Attributes.fill "none"
-                        , Svg.Attributes.d line.value
-                        ]
-                        []
+        , div
+            [ Html.Attributes.class "main__overview-field main__overview-field_active"
+            , Html.Attributes.style "width" (pct (100 * (range.to - range.from)))
+            , Html.Events.on "touchstart" (withTouchXandSelectorWidth StartSelectorAreaChanging)
+            ]
+            [ div
+                [ Html.Attributes.class "main__overview-expander"
+                , Html.Events.stopPropagationOn "touchstart" (stop (withTouchXandSelectorWidth StartSelectorFromChanging))
+                ]
+                []
+            , div
+                [ Html.Attributes.class "main__overview-expander main__overview-expander_end"
+                , Html.Events.stopPropagationOn "touchstart" (stop (withTouchXandSelectorWidth StartSelectorToChanging))
+                ]
+                []
+            ]
+        , div
+            [ Html.Attributes.class "main__overview-field main__overview-field_end"
+            ]
+            []
+        ]
+
+
+view : Model -> Html Msg
+view (Model settings chart state) =
+    div
+        []
+        [ svg
+            [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
+            ]
+            [ Svg.Keyed.node "g"
+                []
+                (List.map
+                    (\line ->
+                        ( line.id
+                        , path
+                            [ Svg.Attributes.stroke line.color
+                            , Svg.Attributes.strokeWidth "1.5"
+                            , Svg.Attributes.fill "none"
+                            , Svg.Attributes.d line.value
+                            ]
+                            []
+                        )
                     )
+                    (draw settings state.canvas)
                 )
-                (draw config settings canvas)
-            )
+            ]
+        , Html.Lazy.lazy2 viewOverviewSelector state.range state.dragging
         ]
