@@ -223,7 +223,8 @@ selectHelp ( from, to ) { animation } data state =
             data.lines
             (Just Dict.empty)
         , Tuple.first selectedTimeline
-        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
+          -- , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
+        , Tuple.first selectedValues
         )
     of
         ( Just nextCorrectLines, Just limitsX, Just limitsY ) ->
@@ -256,24 +257,12 @@ selectHelp ( from, to ) { animation } data state =
                         let
                             done =
                                 easeOutQuad (1 - countdown / animation.duration)
-
-                            nextStartYMin =
-                                if limitsYStart.min == 0 && limitsYEnd.min == 0 then
-                                    0
-
-                                else
-                                    limitsYStart.min * limitsYEnd.min / (limitsYEnd.min + (limitsYStart.min - limitsYEnd.min) * done)
-
-                            nextStartYMax =
-                                if limitsYStart.max == 0 && limitsYEnd.max == 0 then
-                                    0
-
-                                else
-                                    limitsYStart.max * limitsYEnd.max / (limitsYEnd.max + (limitsYStart.max - limitsYEnd.max) * done)
                         in
                         Animated animation.duration
                             limitsX
-                            (Limits nextStartYMin nextStartYMax)
+                            { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
+                            , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
+                            }
                             limitsY
                             (Tuple.second selectedTimeline)
                             nextCorrectLines
@@ -377,6 +366,11 @@ easeOutQuad delta =
     delta * (2 - delta)
 
 
+calcDoneLimit : Float -> Float -> Float -> Float
+calcDoneLimit start end done =
+    start + (end - start) * done
+
+
 draw : Config -> Settings -> State -> List (Data.Line String)
 draw { viewBox } { animation } state =
     case state of
@@ -401,7 +395,7 @@ draw { viewBox } { animation } state =
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
-                (\y -> scaleY * (limitsY.min - y))
+                (\y -> scaleY * (limitsY.max - y))
                 timeline
                 lines
 
@@ -417,37 +411,29 @@ draw { viewBox } { animation } state =
                 done =
                     easeOutQuad (1 - countdown / animation.duration)
 
-                mn =
-                    if limitsYStart.min == 0 && limitsYEnd.min == 0 then
+                limitYMin =
+                    calcDoneLimit limitsYStart.min limitsYEnd.min done
+
+                limitYMax =
+                    calcDoneLimit limitsYStart.max limitsYEnd.max done
+
+                scaleY =
+                    if limitYMax == limitYMin then
                         0
 
                     else
-                        limitsYStart.min * limitsYEnd.min / (limitsYEnd.min + (limitsYStart.min - limitsYEnd.min) * done)
-
-                mx =
-                    if limitsYStart.max == 0 && limitsYEnd.max == 0 then
-                        0
-
-                    else
-                        limitsYStart.max * limitsYEnd.max / (limitsYEnd.max + (limitsYStart.max - limitsYEnd.max) * done)
-
-                yR2 y =
-                    if mx == mn then
-                        0
-
-                    else
-                        toFloat viewBox.height * (y - mn) / (mn - mx)
+                        toFloat viewBox.height / (limitYMax - limitYMin)
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
-                yR2
+                (\y -> scaleY * (limitYMax - y))
                 timeline
                 lines
 
 
 makeViewBox : ViewBox -> String
 makeViewBox { width, height } =
-    [ 0, -height, width, height ]
+    [ 0, 0, width, height ]
         |> List.map String.fromInt
         |> String.join " "
 

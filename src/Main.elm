@@ -104,7 +104,7 @@ init json =
               , foo =
                     Foo.init (selectorBar initialSelector)
                         { animation =
-                            { duration = 300
+                            { duration = 500
                             }
                         }
                         (chart
