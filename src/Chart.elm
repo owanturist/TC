@@ -412,6 +412,34 @@ subscriptions (Model _ _ state) =
 -- V I E W
 
 
+block : String
+block =
+    "__chart__"
+
+
+flag : String -> Bool -> ( String, Bool )
+flag =
+    Tuple.pair
+
+
+element : String -> List ( String, Bool ) -> String
+element name modificators =
+    let
+        fullName =
+            block ++ "__" ++ name
+    in
+    List.foldr
+        (\( mod, enabled ) acc ->
+            if enabled then
+                acc ++ " " ++ fullName ++ "_" ++ mod
+
+            else
+                acc
+        )
+        fullName
+        modificators
+
+
 type alias ViewBox =
     { width : Int
     , height : Int
@@ -464,8 +492,8 @@ closest class decoder =
         DOM.className
 
 
-stop : Decoder msg -> Decoder ( msg, Bool )
-stop decoder =
+alwaysStop : Decoder msg -> Decoder ( msg, Bool )
+alwaysStop decoder =
     Decode.map (\msg -> ( msg, True )) decoder
 
 
@@ -482,7 +510,7 @@ withTouchXandSelectorWidth tagger =
         (Decode.field "pageX" Decode.float)
         (Decode.float
             |> Decode.field "clientWidth"
-            |> closest "main__overview-selector"
+            |> closest (element "selector" [])
             |> DOM.target
         )
         |> Decode.at [ "changedTouches", "0" ]
@@ -591,8 +619,8 @@ draw { animation } canvas =
                 lines
 
 
-viewOverviewSelector : Range -> Dragging -> Html Msg
-viewOverviewSelector range dragging =
+viewSelector : Range -> Dragging -> Html Msg
+viewSelector range dragging =
     let
         handlers =
             case dragging of
@@ -605,32 +633,32 @@ viewOverviewSelector range dragging =
                     ]
     in
     div
-        (Html.Attributes.class "main__overview-selector"
+        (Html.Attributes.class (element "selector" [])
             :: handlers
         )
         [ div
-            [ Html.Attributes.class "main__overview-field"
+            [ Html.Attributes.class (element "selector-field" [ flag "left" True ])
             , Html.Attributes.style "width" (pct (100 * range.from))
             ]
             []
         , div
-            [ Html.Attributes.class "main__overview-field main__overview-field_active"
+            [ Html.Attributes.class (element "selector-field" [ flag "middle" True ])
             , Html.Attributes.style "width" (pct (100 * (range.to - range.from)))
             , Html.Events.on "touchstart" (withTouchXandSelectorWidth StartSelectorAreaChanging)
             ]
             [ div
-                [ Html.Attributes.class "main__overview-expander"
-                , Html.Events.stopPropagationOn "touchstart" (stop (withTouchXandSelectorWidth StartSelectorFromChanging))
+                [ Html.Attributes.class (element "selector-expander" [ flag "from" True ])
+                , Html.Events.stopPropagationOn "touchstart" (alwaysStop (withTouchXandSelectorWidth StartSelectorFromChanging))
                 ]
                 []
             , div
-                [ Html.Attributes.class "main__overview-expander main__overview-expander_end"
-                , Html.Events.stopPropagationOn "touchstart" (stop (withTouchXandSelectorWidth StartSelectorToChanging))
+                [ Html.Attributes.class (element "selector-expander" [ flag "to" True ])
+                , Html.Events.stopPropagationOn "touchstart" (alwaysStop (withTouchXandSelectorWidth StartSelectorToChanging))
                 ]
                 []
             ]
         , div
-            [ Html.Attributes.class "main__overview-field main__overview-field_end"
+            [ Html.Attributes.class (element "selector-field" [ flag "right" True ])
             ]
             []
         ]
@@ -639,7 +667,8 @@ viewOverviewSelector range dragging =
 view : Model -> Html Msg
 view (Model settings chart state) =
     div
-        []
+        [ Html.Attributes.class block
+        ]
         [ svg
             [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
             ]
@@ -660,5 +689,5 @@ view (Model settings chart state) =
                     (draw settings state.canvas)
                 )
             ]
-        , Html.Lazy.lazy2 viewOverviewSelector state.range state.dragging
+        , Html.Lazy.lazy2 viewSelector state.range state.dragging
         ]

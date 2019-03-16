@@ -1,0 +1,48 @@
+.__chart__ {
+    & {
+        overflow: hidden;
+    }
+
+    &__selector {
+        display: flex;
+        margin: 20px;
+        height: 60px;
+    }
+
+    &__selector-field {
+        box-sizing: border-box;
+        flex: 0 0 auto;
+        transform: translate(0, 0);
+
+        &_left,
+        &_right {
+            background: rgba(246, 250, 252, .7);
+        }
+
+        &_middle {
+            position: relative;
+            z-index: 1;
+            border: 0 solid rgba(221, 234, 243, .7);
+            border-width: 1px 4px;
+        }
+
+        &_right {
+            flex: 1 0 auto;
+        }
+    }
+
+    &__selector-expander {
+        position: absolute;
+        top: -1px;
+        bottom: -1px;
+        width: 48px;
+
+        &_from {
+            left: -28px;
+        }
+
+        &_to {
+            right: -28px
+        }
+    }
+}
