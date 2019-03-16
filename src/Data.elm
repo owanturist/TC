@@ -1,4 +1,15 @@
-module Data exposing (Chart, Line, decode, foldlChart, mapChartX, mapChartY, mapLineValue, setLineValue)
+module Data exposing
+    ( Chart
+    , Line
+    , decode
+    , firstChartX
+    , foldlChart
+    , lastChartX
+    , mapChartX
+    , mapChartY
+    , mapLineValue
+    , setLineValue
+    )
 
 import Dict exposing (Dict)
 import Json.Decode as Decode exposing (Decoder, decodeValue)
@@ -28,24 +39,98 @@ setLineValue nextValue { id, name, color } =
 
 
 
+-- C O O R D I N A T E S
+
+
+type Coordinates a
+    = Coordinates a a (List a)
+
+
+mapCoordinates : (a -> b) -> Coordinates a -> Coordinates b
+mapCoordinates fn (Coordinates first second rest) =
+    Coordinates (fn first) (fn second) (List.map fn rest)
+
+
+coordinatesToList : Coordinates a -> List a
+coordinatesToList (Coordinates first second rest) =
+    first :: second :: rest
+
+
+coordinatesFromList : List a -> Maybe (Coordinates a)
+coordinatesFromList list =
+    case list of
+        first :: second :: rest ->
+            Just (Coordinates first second rest)
+
+        _ ->
+            Nothing
+
+
+coordinatesDecoder : String -> Decoder a -> Decoder (Coordinates a)
+coordinatesDecoder error elementDecoder =
+    Decode.andThen
+        (\list ->
+            case coordinatesFromList list of
+                Nothing ->
+                    Decode.fail (error ++ " It needs to have more than one value.")
+
+                Just coordinates ->
+                    Decode.succeed coordinates
+        )
+        (Decode.list elementDecoder)
+
+
+coordinatesLength : Coordinates a -> Int
+coordinatesLength (Coordinates _ _ rest) =
+    2 + List.length rest
+
+
+coordinatesTake : Int -> Coordinates a -> Coordinates a
+coordinatesTake count (Coordinates first second rest) =
+    Coordinates first second (List.take (count - 2) rest)
+
+
+coordinatesFirst : Coordinates a -> a
+coordinatesFirst (Coordinates first _ _) =
+    first
+
+
+coordinatesLast : Coordinates a -> a
+coordinatesLast (Coordinates _ second rest) =
+    rest
+        |> List.reverse
+        |> List.head
+        |> Maybe.withDefault second
+
+
+
 -- C H A R T
 
 
 type alias Chart x y =
-    { size : Int
-    , timeline : List x
-    , lines : Dict String (Line (List y))
+    { timeline : Coordinates x
+    , lines : Dict String (Line (Coordinates y))
     }
 
 
+firstChartX : Chart x y -> x
+firstChartX { timeline } =
+    coordinatesFirst timeline
+
+
+lastChartX : Chart x y -> x
+lastChartX { timeline } =
+    coordinatesLast timeline
+
+
 mapChartX : (a -> b) -> Chart a y -> Chart b y
-mapChartX fn { size, timeline, lines } =
-    Chart size (List.map fn timeline) lines
+mapChartX fn { timeline, lines } =
+    Chart (mapCoordinates fn timeline) lines
 
 
 mapChartY : (a -> b) -> Chart x a -> Chart x b
-mapChartY fn { size, timeline, lines } =
-    Chart size timeline (Dict.map (\_ -> mapLineValue (List.map fn)) lines)
+mapChartY fn { timeline, lines } =
+    Chart timeline (Dict.map (\_ -> mapLineValue (mapCoordinates fn)) lines)
 
 
 foldChartNext : List ( key, List y ) -> Maybe ( List ( key, y ), List ( key, List y ) )
@@ -84,8 +169,10 @@ foldlChart : (x -> List ( String, y ) -> acc -> acc) -> acc -> Chart x y -> acc
 foldlChart fn acc { timeline, lines } =
     List.foldl
         (foldChartStep fn)
-        ( acc, List.map (Tuple.mapSecond .value) (Dict.toList lines) )
-        timeline
+        ( acc
+        , List.map (Tuple.mapSecond (coordinatesToList << .value)) (Dict.toList lines)
+        )
+        (coordinatesToList timeline)
         |> Tuple.first
 
 
@@ -144,13 +231,13 @@ chartDecoder xDecoder yDecoder =
                             Decode.map2
                                 (\( _, lines ) timeline -> ( Just timeline, lines ))
                                 acc
-                                (Decode.at [ "columns", id ] (Decode.list xDecoder))
+                                (Decode.at [ "columns", id ] (coordinatesDecoder "Field `x` is too short." xDecoder))
 
                         "line" ->
                             Decode.map2
                                 (\( timeline, lines ) line -> ( timeline, ( id, line ) :: lines ))
                                 acc
-                                (lineDecoder id (Decode.list yDecoder))
+                                (lineDecoder id (coordinatesDecoder ("Line `" ++ id ++ "` is too short.") yDecoder))
 
                         unknown ->
                             Decode.fail ("Unknown type :`" ++ unknown ++ "`.")
@@ -166,34 +253,19 @@ chartDecoder xDecoder yDecoder =
                     ( _, [] ) ->
                         Decode.fail "No one `line{N}` isn't provided."
 
-                    ( Just (firstX :: []), _ ) ->
-                        Decode.fail "Field `x` is too short. It needs to have more than one value."
-
                     ( Just timeline, lines ) ->
-                        List.foldr
-                            (\( lineId, line ) ->
-                                Decode.andThen
-                                    (\prevMin ->
-                                        let
-                                            lineLength =
-                                                List.length line.value
-                                        in
-                                        if lineLength < 2 then
-                                            Decode.fail ("Line `" ++ lineId ++ "` is too short. It needs to have more than one value.")
-
-                                        else
-                                            Decode.succeed (min prevMin lineLength)
-                                    )
-                            )
-                            (Decode.succeed (List.length timeline))
-                            lines
-                            |> Decode.map
-                                (\minLength ->
+                        let
+                            minLength =
+                                List.foldr
+                                    (\( _, line ) prev -> min prev (coordinatesLength line.value))
+                                    (coordinatesLength timeline)
                                     lines
-                                        |> List.map (Tuple.mapSecond (mapLineValue (List.take minLength)))
-                                        |> Dict.fromList
-                                        |> Chart minLength (List.take minLength timeline)
-                                )
+                        in
+                        lines
+                            |> List.map (Tuple.mapSecond (mapLineValue (coordinatesTake minLength)))
+                            |> Dict.fromList
+                            |> Chart (coordinatesTake minLength timeline)
+                            |> Decode.succeed
             )
 
 

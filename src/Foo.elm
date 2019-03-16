@@ -114,9 +114,12 @@ type alias Foo =
     }
 
 
-selectStep : Float -> Float -> Float -> Float -> List ( String, Float ) -> Foo -> Foo
-selectStep from to position x values acc =
+selectStep : Float -> Float -> Float -> Float -> Float -> List ( String, Float ) -> Foo -> Foo
+selectStep from to firstX lastX x values acc =
     let
+        position =
+            (x - firstX) / (lastX - firstX)
+
         approximatorLeft prevPosition current prev =
             prev + (current - prev) * (from - prevPosition) / (position - prevPosition)
 
@@ -187,7 +190,7 @@ selectStep from to position x values acc =
 
 
 selectHelp : ( Float, Float ) -> Settings -> Chart -> State -> State
-selectHelp ( from, to ) { animation } data state =
+selectHelp ( from, to ) { animation } chart state =
     let
         to_ =
             clamp 0 1 to
@@ -195,24 +198,18 @@ selectHelp ( from, to ) { animation } data state =
         from_ =
             clamp 0 to_ from
 
-        lastIndex =
-            toFloat (data.size - 1)
+        ( firstX, lastX ) =
+            ( Data.firstChartX chart, Data.lastChartX chart )
 
-        ( _, { selectedTimeline, selectedValues } ) =
+        { selectedTimeline, selectedValues } =
             -- it builds timeline and Line.value in reversed order, should be reversed again later
             Data.foldlChart
-                (\x values ( index, acc ) ->
-                    ( index + 1
-                    , selectStep from to (index / lastIndex) x values acc
-                    )
-                )
-                ( 0
-                , { selectedTimeline = ( Nothing, [] )
-                  , selectedValues = ( Nothing, Dict.empty )
-                  , approximation = NotApproximate
-                  }
-                )
-                data
+                (selectStep from to firstX lastX)
+                { selectedTimeline = ( Nothing, [] )
+                , selectedValues = ( Nothing, Dict.empty )
+                , approximation = NotApproximate
+                }
+                chart
     in
     case
         ( Dict.merge
@@ -220,11 +217,10 @@ selectHelp ( from, to ) { animation } data state =
             (\lineId nextValue line -> Maybe.map (Dict.insert lineId (Data.setLineValue nextValue line)))
             {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
             (Tuple.second selectedValues)
-            data.lines
+            chart.lines
             (Just Dict.empty)
         , Tuple.first selectedTimeline
-          -- , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
-        , Tuple.first selectedValues
+        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
         )
     of
         ( Just nextCorrectLines, Just limitsX, Just limitsY ) ->
@@ -280,21 +276,21 @@ type Msg
 
 
 update : Msg -> Model -> Model
-update msg (Model settings data state) =
+update msg (Model settings chart state) =
     case msg of
         Tick delta ->
             case state of
                 Animated countdown limitsX limitsYStart limitsYEnd timeline lines ->
                     if delta >= countdown then
                         Static limitsX limitsYEnd timeline lines
-                            |> Model settings data
+                            |> Model settings chart
 
                     else
                         Animated (countdown - delta) limitsX limitsYStart limitsYEnd timeline lines
-                            |> Model settings data
+                            |> Model settings chart
 
                 _ ->
-                    Model settings data state
+                    Model settings chart state
 
 
 
@@ -302,7 +298,7 @@ update msg (Model settings data state) =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions (Model settings data state) =
+subscriptions (Model settings chart state) =
     case state of
         Animated _ _ _ _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
@@ -439,7 +435,7 @@ makeViewBox { width, height } =
 
 
 view : Config -> Model -> Svg msg
-view config (Model settings data state) =
+view config (Model settings chart state) =
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         ]

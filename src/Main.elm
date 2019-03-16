@@ -1,7 +1,6 @@
 module Main exposing (main)
 
 import Browser
-import Chart exposing (Chart)
 import DOM
 import Data
 import Dict exposing (Dict)
@@ -104,7 +103,7 @@ init json =
               , foo =
                     Foo.init (selectorBar initialSelector)
                         { animation =
-                            { duration = 500
+                            { duration = 2000
                             }
                         }
                         (chart
@@ -212,69 +211,6 @@ pct value =
     String.fromFloat value ++ "%"
 
 
-makeViewBox : Int -> Int -> String
-makeViewBox width height =
-    String.join " "
-        [ "0"
-        , String.fromFloat (1.1 * toFloat -height)
-        , String.fromInt width
-        , String.fromFloat (1.1 * toFloat height)
-        ]
-
-
-viewPaths :
-    { width : Int
-    , height : Int
-    , strokeWidth : Int
-    }
-    -> Chart
-    -> List (Svg msg)
-viewPaths { width, height, strokeWidth } chart =
-    List.map
-        (\line ->
-            path
-                [ Svg.Attributes.stroke line.color
-                , Svg.Attributes.strokeWidth (String.fromInt strokeWidth)
-                , Svg.Attributes.fill "none"
-                , Svg.Attributes.d line.value
-                ]
-                []
-        )
-        (Chart.draw width height chart)
-
-
-viewChart : Chart -> Html msg
-viewChart chart =
-    div []
-        [ svg
-            [ Svg.Attributes.class "main__svg"
-            , Svg.Attributes.viewBox (makeViewBox 460 460)
-            ]
-            (viewPaths
-                { width = 460
-                , height = 460
-                , strokeWidth = 3
-                }
-                chart
-            )
-        ]
-
-
-viewOverviewSvg : Chart -> Svg msg
-viewOverviewSvg chart =
-    svg
-        [ Svg.Attributes.class "main__svg"
-        , Svg.Attributes.viewBox (makeViewBox 460 60)
-        ]
-        (viewPaths
-            { width = 460
-            , height = 60
-            , strokeWidth = 1
-            }
-            chart
-        )
-
-
 viewOverviewSelector : Selector -> Dragging -> Html Msg
 viewOverviewSelector selector dragging =
     let
@@ -325,8 +261,8 @@ viewContainer children =
     div [ Attributes.class "main__container" ] children
 
 
-view : Selector -> Dragging -> Chart -> Html Msg
-view selector dragging chart =
+view : Selector -> Dragging -> Html Msg
+view selector dragging =
     div
         [ Attributes.class "main"
         ]
@@ -334,8 +270,7 @@ view selector dragging chart =
             [ div
                 [ Attributes.class "main__overview"
                 ]
-                [ Lazy.lazy viewOverviewSvg chart
-                , Lazy.lazy2 viewOverviewSelector selector dragging
+                [ Lazy.lazy2 viewOverviewSelector selector dragging
                 ]
             ]
         ]
@@ -362,6 +297,5 @@ main =
                     , view
                         model.selector
                         model.dragging
-                        (Chart.init (toFloat << Time.posixToMillis) toFloat model.chart.timeline model.chart.lines)
                     ]
         }
