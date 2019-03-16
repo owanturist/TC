@@ -36,14 +36,14 @@ type alias Settings =
     }
 
 
-type State
+type Canvas
     = Empty
     | Static Limits Limits Timeline Lines
     | Animated Float Limits Limits Limits Timeline Lines
 
 
 type Model
-    = Model Settings Chart State
+    = Model Settings Chart Canvas
 
 
 init : ( Float, Float ) -> Settings -> Chart -> Model
@@ -55,8 +55,8 @@ init selector settings chart =
 
 
 select : ( Float, Float ) -> Model -> Model
-select range (Model settings chart state) =
-    Model settings chart (selectHelp range settings chart state)
+select range (Model settings chart canvas) =
+    Model settings chart (selectHelp range settings chart canvas)
 
 
 consToTimeline : Float -> ( Maybe Limits, Timeline ) -> ( Maybe Limits, Timeline )
@@ -190,8 +190,8 @@ selectStep from to firstX lastX x bunch acc =
         { acc | approximation = ToLeft ( position, x, List.map Tuple.second bunch ) }
 
 
-selectHelp : ( Float, Float ) -> Settings -> Chart -> State -> State
-selectHelp ( from, to ) { animation } chart state =
+selectHelp : ( Float, Float ) -> Settings -> Chart -> Canvas -> Canvas
+selectHelp ( from, to ) { animation } chart canvas =
     let
         to_ =
             clamp 0 1 to
@@ -225,7 +225,7 @@ selectHelp ( from, to ) { animation } chart state =
         )
     of
         ( Just values, Just limitsX, Just limitsY ) ->
-            case state of
+            case canvas of
                 Empty ->
                     Static limitsX limitsY (Tuple.second selection.timeline) values
 
@@ -277,10 +277,10 @@ type Msg
 
 
 update : Msg -> Model -> Model
-update msg (Model settings chart state) =
+update msg (Model settings chart canvas) =
     case msg of
         Tick delta ->
-            case state of
+            case canvas of
                 Animated countdown limitsX limitsYStart limitsYEnd timeline lines ->
                     if delta >= countdown then
                         Static limitsX limitsYEnd timeline lines
@@ -291,7 +291,7 @@ update msg (Model settings chart state) =
                             |> Model settings chart
 
                 _ ->
-                    Model settings chart state
+                    Model settings chart canvas
 
 
 
@@ -299,8 +299,8 @@ update msg (Model settings chart state) =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions (Model settings chart state) =
-    case state of
+subscriptions (Model settings chart canvas) =
+    case canvas of
         Animated _ _ _ _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
 
@@ -368,9 +368,9 @@ calcDoneLimit start end done =
     start + (end - start) * done
 
 
-draw : Config -> Settings -> State -> List (Data.Line String)
-draw { viewBox } { animation } state =
-    case state of
+draw : Config -> Settings -> Canvas -> List (Data.Line String)
+draw { viewBox } { animation } canvas =
+    case canvas of
         Empty ->
             []
 
@@ -436,7 +436,7 @@ makeViewBox { width, height } =
 
 
 view : Config -> Model -> Svg msg
-view config (Model settings chart state) =
+view config (Model settings chart canvas) =
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         ]
@@ -454,6 +454,6 @@ view config (Model settings chart state) =
                         []
                     )
                 )
-                (draw config settings state)
+                (draw config settings canvas)
             )
         ]
