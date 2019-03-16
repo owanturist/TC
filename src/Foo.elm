@@ -107,15 +107,15 @@ type Approximation a
     | ToRight a
 
 
-type alias Foo =
-    { selectedTimeline : ( Maybe Limits, Timeline )
-    , selectedValues : ( Maybe Limits, Dict String (List Float) )
+type alias Selection =
+    { timeline : ( Maybe Limits, Timeline )
+    , values : ( Maybe Limits, Dict String (List Float) )
     , approximation : Approximation ( Float, Float, List Float )
     }
 
 
-selectStep : Float -> Float -> Float -> Float -> Float -> List ( String, Float ) -> Foo -> Foo
-selectStep from to firstX lastX x values acc =
+selectStep : Float -> Float -> Float -> Float -> Float -> List ( String, Float ) -> Selection -> Selection
+selectStep from to firstX lastX x bunch acc =
     let
         position =
             (x - firstX) / (lastX - firstX)
@@ -135,17 +135,17 @@ selectStep from to firstX lastX x values acc =
                             approximatorLeft prevPosition x prevX
 
                         approximatedValues =
-                            approximate (approximatorLeft prevPosition) prevValues values
+                            approximate (approximatorLeft prevPosition) prevValues bunch
                     in
-                    { selectedTimeline = consToTimeline x (consToTimeline approximatedX acc.selectedTimeline)
-                    , selectedValues = consToLines values (consToLines approximatedValues acc.selectedValues)
-                    , approximation = ToRight ( position, x, List.map Tuple.second values )
+                    { timeline = consToTimeline x (consToTimeline approximatedX acc.timeline)
+                    , values = consToLines bunch (consToLines approximatedValues acc.values)
+                    , approximation = ToRight ( position, x, List.map Tuple.second bunch )
                     }
 
                 _ ->
-                    { selectedTimeline = consToTimeline x acc.selectedTimeline
-                    , selectedValues = consToLines values acc.selectedValues
-                    , approximation = ToRight ( position, x, List.map Tuple.second values )
+                    { timeline = consToTimeline x acc.timeline
+                    , values = consToLines bunch acc.values
+                    , approximation = ToRight ( position, x, List.map Tuple.second bunch )
                     }
 
         else
@@ -162,13 +162,13 @@ selectStep from to firstX lastX x values acc =
                             approximatorRight prevPosition x prevX
 
                         approximatedLeftValues =
-                            approximate (approximatorLeft prevPosition) prevValues values
+                            approximate (approximatorLeft prevPosition) prevValues bunch
 
                         approximatedRightValues =
-                            approximate (approximatorRight prevPosition) prevValues values
+                            approximate (approximatorRight prevPosition) prevValues bunch
                     in
-                    { selectedTimeline = List.foldr consToTimeline acc.selectedTimeline [ aproximatedRightX, aproximatedLeftX ]
-                    , selectedValues = List.foldr consToLines acc.selectedValues [ approximatedRightValues, approximatedLeftValues ]
+                    { timeline = List.foldr consToTimeline acc.timeline [ aproximatedRightX, aproximatedLeftX ]
+                    , values = List.foldr consToLines acc.values [ approximatedRightValues, approximatedLeftValues ]
                     , approximation = NotApproximate
                     }
 
@@ -178,15 +178,15 @@ selectStep from to firstX lastX x values acc =
                             approximatorRight prevPosition x prevX
 
                         approximatedValues =
-                            approximate (approximatorRight prevPosition) prevValues values
+                            approximate (approximatorRight prevPosition) prevValues bunch
                     in
-                    { selectedTimeline = consToTimeline approximatedX acc.selectedTimeline
-                    , selectedValues = consToLines approximatedValues acc.selectedValues
+                    { timeline = consToTimeline approximatedX acc.timeline
+                    , values = consToLines approximatedValues acc.values
                     , approximation = NotApproximate
                     }
 
     else
-        { acc | approximation = ToLeft ( position, x, List.map Tuple.second values ) }
+        { acc | approximation = ToLeft ( position, x, List.map Tuple.second bunch ) }
 
 
 selectHelp : ( Float, Float ) -> Settings -> Chart -> State -> State
@@ -201,12 +201,12 @@ selectHelp ( from, to ) { animation } chart state =
         ( firstX, lastX ) =
             ( Data.firstChartX chart, Data.lastChartX chart )
 
-        { selectedTimeline, selectedValues } =
+        selection =
             -- it builds timeline and Line.value in reversed order, should be reversed again later
             Data.foldlChart
                 (selectStep from to firstX lastX)
-                { selectedTimeline = ( Nothing, [] )
-                , selectedValues = ( Nothing, Dict.empty )
+                { timeline = ( Nothing, [] )
+                , values = ( Nothing, Dict.empty )
                 , approximation = NotApproximate
                 }
                 chart
@@ -216,29 +216,29 @@ selectHelp ( from, to ) { animation } chart state =
             {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
             (\lineId nextValue line -> Maybe.map (Dict.insert lineId (Data.setLineValue nextValue line)))
             {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
-            (Tuple.second selectedValues)
+            (Tuple.second selection.values)
             chart.lines
             (Just Dict.empty)
-        , Tuple.first selectedTimeline
-        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
+        , Tuple.first selection.timeline
+        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selection.values)
         )
     of
-        ( Just nextCorrectLines, Just limitsX, Just limitsY ) ->
+        ( Just values, Just limitsX, Just limitsY ) ->
             case state of
                 Empty ->
-                    Static limitsX limitsY (Tuple.second selectedTimeline) nextCorrectLines
+                    Static limitsX limitsY (Tuple.second selection.timeline) values
 
                 Static _ prevLimitsY _ _ ->
                     if prevLimitsY == limitsY then
-                        Static limitsX limitsY (Tuple.second selectedTimeline) nextCorrectLines
+                        Static limitsX limitsY (Tuple.second selection.timeline) values
 
                     else
                         Animated animation.duration
                             limitsX
                             prevLimitsY
                             limitsY
-                            (Tuple.second selectedTimeline)
-                            nextCorrectLines
+                            (Tuple.second selection.timeline)
+                            values
 
                 Animated countdown _ limitsYStart limitsYEnd _ _ ->
                     if limitsYEnd == limitsY then
@@ -246,8 +246,8 @@ selectHelp ( from, to ) { animation } chart state =
                             limitsX
                             limitsYStart
                             limitsYEnd
-                            (Tuple.second selectedTimeline)
-                            nextCorrectLines
+                            (Tuple.second selection.timeline)
+                            values
 
                     else
                         let
@@ -260,8 +260,8 @@ selectHelp ( from, to ) { animation } chart state =
                             , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
                             }
                             limitsY
-                            (Tuple.second selectedTimeline)
-                            nextCorrectLines
+                            (Tuple.second selection.timeline)
+                            values
 
         _ ->
             Empty
