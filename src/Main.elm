@@ -1,18 +1,18 @@
 module Main exposing (main)
 
 import Browser
+import Chart
 import Data
-import Foo
-import Html
-import Time
 import Json.Decode as Decode exposing (Value)
+import Time
+
 
 
 -- M O D E L
 
 
 type alias Model =
-    Foo.Model
+    Chart.Model
 
 
 init : Value -> ( Model, Cmd Msg )
@@ -22,9 +22,9 @@ init json =
             Debug.todo (Decode.errorToString err)
 
         Ok chart ->
-            ( Foo.init
+            ( Chart.init
                 { animation =
-                    { duration = 2000
+                    { duration = 300
                     }
                 }
                 (chart
@@ -39,13 +39,13 @@ init json =
 -- U P D A T E
 
 
-type Msg
-    = FooMsg Foo.Msg
+type alias Msg =
+    Chart.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update (FooMsg msgOfFoo) model =
-    ( Foo.update msgOfFoo model
+update msgOfChart model =
+    ( Chart.update msgOfChart model
     , Cmd.none
     )
 
@@ -56,7 +56,7 @@ update (FooMsg msgOfFoo) model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Sub.map FooMsg (Foo.subscriptions model)
+    Chart.subscriptions model
 
 
 
@@ -66,7 +66,7 @@ subscriptions model =
 view : Model -> Browser.Document Msg
 view model =
     Browser.Document "Charts"
-        [ Html.map FooMsg (Foo.view model)
+        [ Chart.view model
         ]
 
 

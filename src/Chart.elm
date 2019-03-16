@@ -1,4 +1,4 @@
-module Foo exposing (Model, Msg, Settings, init, subscriptions, update, view)
+module Chart exposing (Model, Msg, Settings, init, subscriptions, update, view)
 
 import Browser.Events
 import DOM
