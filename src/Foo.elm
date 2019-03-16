@@ -178,33 +178,31 @@ draw config state =
                     easeOutQuad (1 - countdown / config.duration)
 
                 mn =
-                    limitsYStart.min * limitsYEnd.min / (limitsYEnd.min + (limitsYStart.min - limitsYEnd.min) * done)
+                    if limitsYStart.min == 0 && limitsYEnd.min == 0 then
+                        0
+
+                    else
+                        limitsYStart.min * limitsYEnd.min / (limitsYEnd.min + (limitsYStart.min - limitsYEnd.min) * done)
 
                 mx =
-                    limitsYStart.max * limitsYEnd.max / (limitsYEnd.max + (limitsYStart.max - limitsYEnd.max) * done)
+                    if limitsYStart.max == 0 && limitsYEnd.max == 0 then
+                        0
+
+                    else
+                        limitsYStart.max * limitsYEnd.max / (limitsYEnd.max + (limitsYStart.max - limitsYEnd.max) * done)
 
                 yR2 y =
-                    toFloat config.viewBox.height * (y - mn) / (mn - mx)
+                    if mx == mn then
+                        0
+
+                    else
+                        toFloat config.viewBox.height * (y - mn) / (mn - mx)
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
                 yR2
                 timeline
                 lines
-
-
-minmax : List comparable -> Maybe ( comparable, comparable )
-minmax =
-    List.foldr
-        (\point acc ->
-            case acc of
-                Nothing ->
-                    Just ( point, point )
-
-                Just ( minPoint, maxPoint ) ->
-                    Just ( min point minPoint, max point maxPoint )
-        )
-        Nothing
 
 
 type State
@@ -409,8 +407,7 @@ selectHelp ( from, to ) config data state =
             data.lines
             (Just Dict.empty)
         , Tuple.first selectedTimeline
-          -- , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
-        , Tuple.first selectedValues
+        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selectedValues)
         )
     of
         ( Just nextCorrectLines, Just limitsX, Just limitsY ) ->
@@ -445,10 +442,18 @@ selectHelp ( from, to ) config data state =
                                 easeOutQuad (1 - countdown / config.duration)
 
                             mn =
-                                limitsYStart.min * limitsYEnd.min / (limitsYEnd.min + (limitsYStart.min - limitsYEnd.min) * done)
+                                if limitsYStart.min == 0 && limitsYEnd.min == 0 then
+                                    0
+
+                                else
+                                    limitsYStart.min * limitsYEnd.min / (limitsYEnd.min + (limitsYStart.min - limitsYEnd.min) * done)
 
                             mx =
-                                limitsYStart.max * limitsYEnd.max / (limitsYEnd.max + (limitsYStart.max - limitsYEnd.max) * done)
+                                if limitsYStart.max == 0 && limitsYEnd.max == 0 then
+                                    0
+
+                                else
+                                    limitsYStart.max * limitsYEnd.max / (limitsYEnd.max + (limitsYStart.max - limitsYEnd.max) * done)
                         in
                         Animation config.duration
                             limitsX
@@ -523,10 +528,6 @@ makeViewBox { width, height } =
 
 view : Model -> Svg msg
 view (Model config data state) =
-    let
-        chart =
-            draw config state
-    in
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         ]
