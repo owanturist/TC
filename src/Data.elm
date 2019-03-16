@@ -1,29 +1,100 @@
-module Data exposing (Chart, Line, decode)
+module Data exposing (Chart, Line, decode, foldlChart, mapChartX, mapChartY, mapLineValue, setLineValue)
 
+import Dict exposing (Dict)
 import Json.Decode as Decode exposing (Decoder, decodeValue)
 import Json.Encode as Encode exposing (Value)
-import Time
-import Dict exposing (Dict)
 
-type alias Line =
-    { name : String
+
+
+-- L I N E
+
+
+type alias Line value =
+    { id : String
+    , name : String
     , color : String
-    , value : List Int
+    , value : value
     }
 
 
-type alias Chart =
-    { axisX : List Time.Posix
-    , lines : Dict String Line
+mapLineValue : (a -> b) -> Line a -> Line b
+mapLineValue fn { id, name, color, value } =
+    Line id name color (fn value)
+
+
+setLineValue : b -> Line a -> Line b
+setLineValue nextValue { id, name, color } =
+    Line id name color nextValue
+
+
+
+-- C H A R T
+
+
+type alias Chart x y =
+    { size : Int
+    , timeline : List x
+    , lines : Dict String (Line (List y))
     }
+
+
+mapChartX : (a -> b) -> Chart a y -> Chart b y
+mapChartX fn { size, timeline, lines } =
+    Chart size (List.map fn timeline) lines
+
+
+mapChartY : (a -> b) -> Chart x a -> Chart x b
+mapChartY fn { size, timeline, lines } =
+    Chart size timeline (Dict.map (\_ -> mapLineValue (List.map fn)) lines)
+
+
+foldChartNext : List ( key, List y ) -> Maybe ( List ( key, y ), List ( key, List y ) )
+foldChartNext =
+    List.foldr
+        (\( key, value ) acc ->
+            case acc of
+                Nothing ->
+                    Nothing
+
+                Just ( heads, tails ) ->
+                    case value of
+                        first :: rest ->
+                            Just
+                                ( ( key, first ) :: heads
+                                , ( key, rest ) :: tails
+                                )
+
+                        [] ->
+                            Nothing
+        )
+        (Just ( [], [] ))
+
+
+foldChartStep : (x -> List ( key, y ) -> acc -> acc) -> x -> ( acc, List ( key, List y ) ) -> ( acc, List ( key, List y ) )
+foldChartStep fn x ( acc, values ) =
+    case foldChartNext values of
+        Nothing ->
+            ( acc, values )
+
+        Just ( heads, tails ) ->
+            ( fn x heads acc, tails )
+
+
+foldlChart : (x -> List ( String, y ) -> acc -> acc) -> acc -> Chart x y -> acc
+foldlChart fn acc { timeline, lines } =
+    List.foldl
+        (foldChartStep fn)
+        ( acc, List.map (Tuple.mapSecond .value) (Dict.toList lines) )
+        timeline
+        |> Tuple.first
 
 
 
 -- D E C O D I N G
 
 
-reformat : Value -> Value
-reformat json =
+convertColumnsFromListToDict : Value -> Value
+convertColumnsFromListToDict json =
     let
         columnsDecoder =
             Decode.map2 Tuple.pair
@@ -53,16 +124,16 @@ reformat json =
             Encode.object pairs
 
 
-lineDecoder : String -> Decoder Line
-lineDecoder lineId =
-    Decode.map3 Line
+lineDecoder : String -> Decoder value -> Decoder (Line value)
+lineDecoder lineId valueDecoder =
+    Decode.map3 (Line lineId)
         (Decode.at [ "names", lineId ] Decode.string)
         (Decode.at [ "colors", lineId ] Decode.string)
-        (Decode.at [ "columns", lineId ] (Decode.list Decode.int))
+        (Decode.at [ "columns", lineId ] valueDecoder)
 
 
-chartDecoder : Decoder Chart
-chartDecoder =
+chartDecoder : Decoder x -> Decoder y -> Decoder (Chart x y)
+chartDecoder xDecoder yDecoder =
     Decode.keyValuePairs Decode.string
         |> Decode.field "types"
         |> Decode.andThen
@@ -71,32 +142,61 @@ chartDecoder =
                     case type_ of
                         "x" ->
                             Decode.map2
-                                (\tmp value -> { tmp | axisX = Just value })
+                                (\( _, lines ) timeline -> ( Just timeline, lines ))
                                 acc
-                                (Decode.at [ "columns", id ] (Decode.list (Decode.map Time.millisToPosix Decode.int)))
+                                (Decode.at [ "columns", id ] (Decode.list xDecoder))
 
                         "line" ->
                             Decode.map2
-                                (\tmp line -> { tmp | lines = ( id, line ) :: tmp.lines })
+                                (\( timeline, lines ) line -> ( timeline, ( id, line ) :: lines ))
                                 acc
-                                (lineDecoder id)
+                                (lineDecoder id (Decode.list yDecoder))
 
                         unknown ->
                             Decode.fail ("Unknown type :`" ++ unknown ++ "`.")
                 )
-                (Decode.succeed { axisX = Nothing, lines = [] })
+                (Decode.succeed ( Nothing, [] ))
             )
         |> Decode.andThen
             (\acc ->
-                case acc.axisX of
-                    Nothing ->
+                case acc of
+                    ( Nothing, _ ) ->
                         Decode.fail "Field `x` isn't provided."
 
-                    Just axisX ->
-                        Decode.succeed (Chart axisX (Dict.fromList acc.lines))
+                    ( _, [] ) ->
+                        Decode.fail "No one `line{N}` isn't provided."
+
+                    ( Just (firstX :: []), _ ) ->
+                        Decode.fail "Field `x` is too short. It needs to have more than one value."
+
+                    ( Just timeline, lines ) ->
+                        List.foldr
+                            (\( lineId, line ) ->
+                                Decode.andThen
+                                    (\prevMin ->
+                                        let
+                                            lineLength =
+                                                List.length line.value
+                                        in
+                                        if lineLength < 2 then
+                                            Decode.fail ("Line `" ++ lineId ++ "` is too short. It needs to have more than one value.")
+
+                                        else
+                                            Decode.succeed (min prevMin lineLength)
+                                    )
+                            )
+                            (Decode.succeed (List.length timeline))
+                            lines
+                            |> Decode.map
+                                (\minLength ->
+                                    lines
+                                        |> List.map (Tuple.mapSecond (mapLineValue (List.take minLength)))
+                                        |> Dict.fromList
+                                        |> Chart minLength (List.take minLength timeline)
+                                )
             )
 
 
-decode : Value -> Result Decode.Error Chart
-decode json =
-    decodeValue chartDecoder (reformat json)
+decode : Decoder x -> Decoder y -> Value -> Result Decode.Error (Chart x y)
+decode xDecoder yDecoder json =
+    decodeValue (chartDecoder xDecoder yDecoder) (convertColumnsFromListToDict json)

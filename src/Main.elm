@@ -82,48 +82,38 @@ selectorBar { from, area } =
 type alias Model =
     { selector : Selector
     , dragging : Dragging
-    , chart : Result Decode.Error Data.Chart
+    , chart : Data.Chart Time.Posix Int
     , foo : Foo.Model
     }
 
 
 init : Value -> ( Model, Cmd Msg )
 init json =
-    let
-        chart =
-            Data.decode json
+    case Data.decode (Decode.map Time.millisToPosix Decode.int) Decode.int json of
+        Err err ->
+            Debug.todo (Decode.errorToString err)
 
-        initialSelector = Selector 0 1
-
-        initialFoo =
-            case chart of
-                Err _ ->
-                    Foo.init
-                        identity
-                        identity
-                        1000
-                        { width = 460, height = 460 }
-                        (selectorBar initialSelector)
-                        []
-                        Dict.empty
-
-                Ok { axisX, lines } ->
-                    Foo.init
-                        (toFloat << Time.posixToMillis)
-                        toFloat
-                        1000
-                        { width = 460, height = 460 }
-                        (selectorBar initialSelector)
-                        axisX
-                        lines
-    in
-    ( { selector = initialSelector
-      , dragging = NoDragging
-      , chart = Data.decode json
-      , foo = initialFoo
-      }
-    , Cmd.none
-    )
+        Ok chart ->
+            let
+                initialSelector =
+                    Selector 0 1
+            in
+            ( { selector = initialSelector
+              , dragging = NoDragging
+              , chart = chart
+              , foo =
+                    Foo.init (selectorBar initialSelector)
+                        { animation =
+                            { duration = 300
+                            }
+                        }
+                        (chart
+                            |> Data.mapChartX (toFloat << Time.posixToMillis)
+                            |> Data.mapChartY toFloat
+                        )
+              }
+            , Cmd.none
+            )
 
 
 
@@ -175,14 +165,9 @@ update msg model =
             )
 
         FooMsg msgOfFoo ->
-            case Foo.update msgOfFoo model.foo of
-                Foo.Idle ->
-                    ( model, Cmd.none )
-
-                Foo.Updated nextFoo ->
-                    ( { model | foo = nextFoo }
-                    , Cmd.none
-                    )
+            ( { model | foo = Foo.update msgOfFoo model.foo }
+            , Cmd.none
+            )
 
 
 
@@ -369,15 +354,14 @@ main =
         , view =
             \model ->
                 Browser.Document "Charts"
-                    [ Html.map FooMsg (Foo.view model.foo)
-                    , case model.chart of
-                        Err err ->
-                            text (Decode.errorToString err)
-
-                        Ok chart ->
-                            view
-                                model.selector
-                                model.dragging
-                                (Chart.init (toFloat << Time.posixToMillis) toFloat chart.axisX chart.lines)
+                    [ Foo.view
+                        { viewBox = { width = 460, height = 460 }
+                        }
+                        model.foo
+                        |> Html.map FooMsg
+                    , view
+                        model.selector
+                        model.dragging
+                        (Chart.init (toFloat << Time.posixToMillis) toFloat model.chart.timeline model.chart.lines)
                     ]
         }

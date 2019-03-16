@@ -4,15 +4,16 @@ import Dict exposing (Dict)
 
 
 type alias Line p =
-    { name : String
+    { id : String
+    , name : String
     , color : String
     , value : p
     }
 
 
 mapValue : (a -> b) -> Line a -> Line b
-mapValue fn { name, color, value } =
-    Line name color (fn value)
+mapValue fn { id, name, color, value } =
+    Line id name color (fn value)
 
 
 type Chart
