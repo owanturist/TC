@@ -1,12 +1,29 @@
-.__chart__ {
+.c-h-a-r-t {
     & {
+        padding: 30px 0;
         overflow: hidden;
     }
 
+    &__svg {
+        display: block;
+    }
+
+    &__container {
+        padding: 0 15px;
+    }
+
+    &__minimap {
+        position: relative;
+    }
+
     &__selector {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        margin: auto;
         display: flex;
-        margin: 20px;
-        height: 60px;
     }
 
     &__selector-field {
@@ -35,14 +52,14 @@
         position: absolute;
         top: -1px;
         bottom: -1px;
-        width: 48px;
+        width: 24px;
 
         &_from {
-            left: -28px;
+            left: -14px;
         }
 
         &_to {
-            right: -28px
+            right: -14px
         }
     }
 }

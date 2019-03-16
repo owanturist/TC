@@ -284,14 +284,14 @@ select range { animation } chart canvas =
         , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selection.values)
         )
     of
-        ( Just values, Just limitsX, Just limitsY ) ->
+        ( Just lines, Just limitsX, Just limitsY ) ->
             case canvas of
                 Empty ->
-                    Static limitsX limitsY (Tuple.second selection.timeline) values
+                    Static limitsX limitsY (Tuple.second selection.timeline) lines
 
                 Static _ prevLimitsY _ _ ->
                     if prevLimitsY == limitsY then
-                        Static limitsX limitsY (Tuple.second selection.timeline) values
+                        Static limitsX limitsY (Tuple.second selection.timeline) lines
 
                     else
                         Animated animation.duration
@@ -299,7 +299,7 @@ select range { animation } chart canvas =
                             prevLimitsY
                             limitsY
                             (Tuple.second selection.timeline)
-                            values
+                            lines
 
                 Animated countdown _ limitsYStart limitsYEnd _ _ ->
                     if limitsYEnd == limitsY then
@@ -308,7 +308,7 @@ select range { animation } chart canvas =
                             limitsYStart
                             limitsYEnd
                             (Tuple.second selection.timeline)
-                            values
+                            lines
 
                     else
                         let
@@ -322,7 +322,7 @@ select range { animation } chart canvas =
                             }
                             limitsY
                             (Tuple.second selection.timeline)
-                            values
+                            lines
 
         _ ->
             Empty
@@ -414,7 +414,7 @@ subscriptions (Model _ _ state) =
 
 block : String
 block =
-    "__chart__"
+    "c-h-a-r-t"
 
 
 flag : String -> Bool -> ( String, Bool )
@@ -619,6 +619,11 @@ draw { animation } canvas =
                 lines
 
 
+viewContainer : List (Html msg) -> Html msg
+viewContainer =
+    div [ Html.Attributes.class (element "container" []) ]
+
+
 viewSelector : Range -> Dragging -> Html Msg
 viewSelector range dragging =
     let
@@ -664,13 +669,39 @@ viewSelector range dragging =
         ]
 
 
-view : Model -> Html Msg
-view (Model settings chart state) =
+viewCanvas : Settings -> Canvas -> Html msg
+viewCanvas settings canvas =
+    svg
+        [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
+        , Svg.Attributes.class (element "svg" [])
+        ]
+        [ Svg.Keyed.node "g"
+            []
+            (List.map
+                (\line ->
+                    ( line.id
+                    , path
+                        [ Svg.Attributes.stroke line.color
+                        , Svg.Attributes.strokeWidth "2"
+                        , Svg.Attributes.fill "none"
+                        , Svg.Attributes.d line.value
+                        ]
+                        []
+                    )
+                )
+                (draw settings canvas)
+            )
+        ]
+
+
+viewMinimap : Chart -> Range -> Dragging -> Html Msg
+viewMinimap chart range dragging =
     div
-        [ Html.Attributes.class block
+        [ Html.Attributes.class (element "minimap" [])
         ]
         [ svg
-            [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
+            [ Svg.Attributes.viewBox (makeViewBox (ViewBox config.viewBox.width 60))
+            , Svg.Attributes.class (element "svg" [])
             ]
             [ Svg.Keyed.node "g"
                 []
@@ -679,15 +710,72 @@ view (Model settings chart state) =
                         ( line.id
                         , path
                             [ Svg.Attributes.stroke line.color
-                            , Svg.Attributes.strokeWidth "1.5"
+                            , Svg.Attributes.strokeWidth "1"
                             , Svg.Attributes.fill "none"
                             , Svg.Attributes.d line.value
                             ]
                             []
                         )
                     )
-                    (draw settings state.canvas)
+                    (foo chart)
                 )
             ]
-        , Html.Lazy.lazy2 viewSelector state.range state.dragging
+        , Html.Lazy.lazy2 viewSelector range dragging
+        ]
+
+
+foo : Chart -> List (Data.Line String)
+foo chart =
+    let
+        asd =
+            Data.foldlChart
+                (\x bunch acc ->
+                    { timeline = consToTimeline x acc.timeline
+                    , values = consToLines bunch acc.values
+                    }
+                )
+                { timeline = ( Nothing, [] )
+                , values = ( Nothing, Dict.empty )
+                }
+                chart
+    in
+    case
+        ( Dict.merge
+            {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
+            (\lineId nextValue line -> Maybe.map (Dict.insert lineId (Data.setLineValue nextValue line)))
+            {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
+            (Tuple.second asd.values)
+            chart.lines
+            (Just Dict.empty)
+        , Tuple.first asd.timeline
+        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first asd.values)
+        )
+    of
+        ( Just lines, Just limitsX, Just limitsY ) ->
+            let
+                scaleX =
+                    calcScale config.viewBox.width limitsX.min limitsX.max
+
+                scaleY =
+                    calcScale 60 limitsY.min limitsY.max
+            in
+            drawHelp
+                (\x -> scaleX * (x - limitsX.min))
+                (\y -> scaleY * (limitsY.max - y))
+                (Tuple.second asd.timeline)
+                lines
+
+        _ ->
+            []
+
+
+view : Model -> Html Msg
+view (Model settings chart state) =
+    div
+        [ Html.Attributes.class block
+        ]
+        [ viewCanvas settings state.canvas
+        , viewContainer
+            [ viewMinimap chart state.range state.dragging
+            ]
         ]
