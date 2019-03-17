@@ -4,6 +4,7 @@ import Browser
 import Chart
 import Data
 import Json.Decode as Decode exposing (Value)
+import Html exposing (code, text)
 import Time
 
 
@@ -11,18 +12,17 @@ import Time
 -- M O D E L
 
 
-type alias Model =
-    Chart.Model
+type alias Model = Result Decode.Error Chart.Model
 
 
 init : Value -> ( Model, Cmd Msg )
 init json =
-    case Data.decode (Decode.map Time.millisToPosix Decode.int) Decode.int json of
+    ( case Data.decode (Decode.map Time.millisToPosix Decode.int) Decode.int json of
         Err err ->
-            Debug.todo (Decode.errorToString err)
+            Err err
 
         Ok chart ->
-            ( Chart.init
+            Chart.init
                 { animation =
                     { duration = 300
                     }
@@ -31,8 +31,9 @@ init json =
                     |> Data.mapChartX (toFloat << Time.posixToMillis)
                     |> Data.mapChartY toFloat
                 )
-            , Cmd.none
-            )
+                |> Ok
+    , Cmd.none
+    )
 
 
 
@@ -45,7 +46,12 @@ type alias Msg =
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msgOfChart model =
-    ( Chart.update msgOfChart model
+    ( case model of
+        Err err ->
+            Err err
+
+        Ok chart ->
+            Ok (Chart.update msgOfChart chart)
     , Cmd.none
     )
 
@@ -56,7 +62,11 @@ update msgOfChart model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Chart.subscriptions model
+    case model of
+        Err _ ->
+            Sub.none
+        Ok chart ->
+            Chart.subscriptions chart
 
 
 
@@ -66,7 +76,11 @@ subscriptions model =
 view : Model -> Browser.Document Msg
 view model =
     Browser.Document "Charts"
-        [ Chart.view model
+        [ case model of
+            Err err ->
+                code [] [text (Decode.errorToString err)]
+            Ok chart ->
+                Chart.view chart
         ]
 
 
