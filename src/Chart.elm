@@ -101,8 +101,8 @@ applyDragging dragging end =
 
 type Canvas
     = Empty
-    | Static Limits Limits Timeline Lines
-    | Animated Float Limits Limits Limits Timeline Lines
+    | Static Limits Limits
+    | Animated Float Limits Limits Limits
 
 
 type alias State =
@@ -122,45 +122,7 @@ init settings chart =
         initialRange =
             Range 0 1
     in
-    Model settings chart (State initialRange NoDragging (select initialRange settings chart Empty))
-
-
-consToTimeline : Float -> ( Maybe Limits, Timeline ) -> ( Maybe Limits, Timeline )
-consToTimeline x ( limits, acc ) =
-    ( case limits of
-        Nothing ->
-            Just (Limits x x)
-
-        Just prev ->
-            Just (Limits prev.min x)
-    , x :: acc
-    )
-
-
-consToLines : List ( String, Float ) -> ( Maybe Limits, Dict String (List Float) ) -> ( Maybe Limits, Dict String (List Float) )
-consToLines bunch acc =
-    List.foldr
-        (\( key, y ) ( limits, lines ) ->
-            ( case limits of
-                Nothing ->
-                    Just (Limits y y)
-
-                Just prev ->
-                    Just (Limits (min y prev.min) (max y prev.max))
-            , Dict.update key
-                (\result ->
-                    case result of
-                        Nothing ->
-                            Just [ y ]
-
-                        Just values ->
-                            Just (y :: values)
-                )
-                lines
-            )
-        )
-        acc
-        bunch
+    Model settings chart (State initialRange NoDragging (selectFoo initialRange settings chart Empty))
 
 
 approximate : (value -> value -> value) -> List value -> List ( key, value ) -> List ( key, value )
@@ -174,15 +136,45 @@ type Approximation a
     | ToRight a
 
 
-type alias Selection =
-    { timeline : ( Maybe Limits, Timeline )
-    , values : ( Maybe Limits, Dict String (List Float) )
+type alias Foo =
+    { timeline : Maybe Limits
+    , values : Maybe Limits
     , approximation : Approximation ( Float, Float, List Float )
     }
 
 
-selectStep : Range -> Float -> Float -> Float -> List ( String, Float ) -> Selection -> Selection
-selectStep { from, to } firstX lastX x bunch acc =
+mergeLimitX : Float -> Maybe Limits -> Maybe Limits
+mergeLimitX x acc =
+    case acc of
+        Nothing ->
+            Just (Limits x x)
+
+        Just prev ->
+            Just (Limits prev.min x)
+
+
+mergeLimitY : List ( String, Float ) -> Maybe Limits -> Maybe Limits
+mergeLimitY bunch acc =
+    case acc of
+        Nothing ->
+            let
+                values =
+                    List.map Tuple.second bunch
+            in
+            Maybe.map2 Limits
+                (List.minimum values)
+                (List.maximum values)
+
+        Just prev ->
+            List.foldr
+                (\( _, y ) limits -> Limits (min y limits.min) (max y limits.max))
+                prev
+                bunch
+                |> Just
+
+
+selectBar : Range -> Float -> Float -> Float -> List ( String, Float ) -> Foo -> Foo
+selectBar { from, to } firstX lastX x bunch acc =
     let
         position =
             (x - firstX) / (lastX - firstX)
@@ -196,22 +188,22 @@ selectStep { from, to } firstX lastX x bunch acc =
     if from <= position then
         if position <= to then
             case acc.approximation of
-                ToLeft ( prevPosition, prevX, prevValues ) ->
+                ToLeft ( prevPosition, prevX, prevBunch ) ->
                     let
                         approximatedX =
                             approximatorLeft prevPosition x prevX
 
                         approximatedValues =
-                            approximate (approximatorLeft prevPosition) prevValues bunch
+                            approximate (approximatorLeft prevPosition) prevBunch bunch
                     in
-                    { timeline = consToTimeline x (consToTimeline approximatedX acc.timeline)
-                    , values = consToLines bunch (consToLines approximatedValues acc.values)
+                    { timeline = mergeLimitX x (mergeLimitX approximatedX acc.timeline)
+                    , values = mergeLimitY bunch (mergeLimitY approximatedValues acc.values)
                     , approximation = ToRight ( position, x, List.map Tuple.second bunch )
                     }
 
                 _ ->
-                    { timeline = consToTimeline x acc.timeline
-                    , values = consToLines bunch acc.values
+                    { timeline = mergeLimitX x acc.timeline
+                    , values = mergeLimitY bunch acc.values
                     , approximation = ToRight ( position, x, List.map Tuple.second bunch )
                     }
 
@@ -220,7 +212,7 @@ selectStep { from, to } firstX lastX x bunch acc =
                 NoApproximate ->
                     acc
 
-                ToLeft ( prevPosition, prevX, prevValues ) ->
+                ToLeft ( prevPosition, prevX, prevBunch ) ->
                     let
                         aproximatedLeftX =
                             approximatorLeft prevPosition x prevX
@@ -229,26 +221,26 @@ selectStep { from, to } firstX lastX x bunch acc =
                             approximatorRight prevPosition x prevX
 
                         approximatedLeftValues =
-                            approximate (approximatorLeft prevPosition) prevValues bunch
+                            approximate (approximatorLeft prevPosition) prevBunch bunch
 
                         approximatedRightValues =
-                            approximate (approximatorRight prevPosition) prevValues bunch
+                            approximate (approximatorRight prevPosition) prevBunch bunch
                     in
-                    { timeline = List.foldr consToTimeline acc.timeline [ aproximatedRightX, aproximatedLeftX ]
-                    , values = List.foldr consToLines acc.values [ approximatedRightValues, approximatedLeftValues ]
+                    { timeline = List.foldr mergeLimitX acc.timeline [ aproximatedRightX, aproximatedLeftX ]
+                    , values = List.foldr mergeLimitY acc.values [ approximatedRightValues, approximatedLeftValues ]
                     , approximation = NoApproximate
                     }
 
-                ToRight ( prevPosition, prevX, prevValues ) ->
+                ToRight ( prevPosition, prevX, prevBunch ) ->
                     let
                         approximatedX =
                             approximatorRight prevPosition x prevX
 
                         approximatedValues =
-                            approximate (approximatorRight prevPosition) prevValues bunch
+                            approximate (approximatorRight prevPosition) prevBunch bunch
                     in
-                    { timeline = consToTimeline approximatedX acc.timeline
-                    , values = consToLines approximatedValues acc.values
+                    { timeline = mergeLimitX approximatedX acc.timeline
+                    , values = mergeLimitY approximatedValues acc.values
                     , approximation = NoApproximate
                     }
 
@@ -256,73 +248,47 @@ selectStep { from, to } firstX lastX x bunch acc =
         { acc | approximation = ToLeft ( position, x, List.map Tuple.second bunch ) }
 
 
-select : Range -> Settings -> Chart -> Canvas -> Canvas
-select range { animation } chart canvas =
+selectFoo : Range -> Settings -> Chart -> Canvas -> Canvas
+selectFoo range { animation } chart canvas =
     let
         ( firstX, lastX ) =
             ( Data.firstChartX chart, Data.lastChartX chart )
 
-        selection =
-            -- it builds timeline and Line.value in reversed order, should be reversed again later
+        { timeline, values } =
             Data.foldlChart
-                (selectStep range firstX lastX)
-                { timeline = ( Nothing, [] )
-                , values = ( Nothing, Dict.empty )
+                (selectBar range firstX lastX)
+                { timeline = Nothing
+                , values = Just (Limits 0 0)
                 , approximation = NoApproximate
                 }
                 chart
     in
-    case
-        ( Dict.merge
-            {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
-            (\lineId nextValue line -> Maybe.map (Dict.insert lineId (Data.setLineValue nextValue line)))
-            {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
-            (Tuple.second selection.values)
-            chart.lines
-            (Just Dict.empty)
-        , Tuple.first selection.timeline
-        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first selection.values)
-        )
-    of
-        ( Just lines, Just limitsX, Just limitsY ) ->
-            case canvas of
-                Empty ->
-                    Static limitsX limitsY (Tuple.second selection.timeline) lines
+    case ( canvas, timeline, values ) of
+        ( Empty, Just limitsX, Just limitsY ) ->
+            Static limitsX limitsY
 
-                Static _ prevLimitsY _ _ ->
-                    if prevLimitsY == limitsY then
-                        Static limitsX limitsY (Tuple.second selection.timeline) lines
+        ( Static _ prevLimitsY, Just limitsX, Just limitsY ) ->
+            if prevLimitsY == limitsY then
+                Static limitsX limitsY
 
-                    else
-                        Animated animation.duration
-                            limitsX
-                            prevLimitsY
-                            limitsY
-                            (Tuple.second selection.timeline)
-                            lines
+            else
+                Animated animation.duration limitsX prevLimitsY limitsY
 
-                Animated countdown _ limitsYStart limitsYEnd _ _ ->
-                    if limitsYEnd == limitsY then
-                        Animated countdown
-                            limitsX
-                            limitsYStart
-                            limitsYEnd
-                            (Tuple.second selection.timeline)
-                            lines
+        ( Animated countdown _ limitsYStart limitsYEnd, Just limitsX, Just limitsY ) ->
+            if limitsYEnd == limitsY then
+                Animated countdown limitsX limitsYStart limitsYEnd
 
-                    else
-                        let
-                            done =
-                                easeOutQuad (1 - countdown / animation.duration)
-                        in
-                        Animated animation.duration
-                            limitsX
-                            { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
-                            , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
-                            }
-                            limitsY
-                            (Tuple.second selection.timeline)
-                            lines
+            else
+                let
+                    done =
+                        easeOutQuad (1 - countdown / animation.duration)
+                in
+                Animated animation.duration
+                    limitsX
+                    { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
+                    , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
+                    }
+                    limitsY
 
         _ ->
             Empty
@@ -369,7 +335,7 @@ update msg (Model settings chart state) =
                         chart
                         { state
                             | range = nextRange
-                            , canvas = select nextRange settings chart state.canvas
+                            , canvas = selectFoo nextRange settings chart state.canvas
                         }
 
         DragEndSelector _ ->
@@ -379,14 +345,14 @@ update msg (Model settings chart state) =
 
         Tick delta ->
             case state.canvas of
-                Animated countdown limitsX limitsYStart limitsYEnd timeline lines ->
+                Animated countdown limitsX limitsYStart limitsYEnd ->
                     let
                         nextCanvas =
                             if delta >= countdown then
-                                Static limitsX limitsYEnd timeline lines
+                                Static limitsX limitsYEnd
 
                             else
-                                Animated (countdown - delta) limitsX limitsYStart limitsYEnd timeline lines
+                                Animated (countdown - delta) limitsX limitsYStart limitsYEnd
                     in
                     Model settings chart { state | canvas = nextCanvas }
 
@@ -401,7 +367,7 @@ update msg (Model settings chart state) =
 subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
     case state.canvas of
-        Animated _ _ _ _ _ _ ->
+        Animated _ _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
 
         _ ->
@@ -526,34 +492,112 @@ coordinate x y =
     String.fromFloat x ++ "," ++ String.fromFloat y
 
 
-drawStep : (Float -> Float) -> (Float -> Float) -> Timeline -> List Float -> String
-drawStep mapX mapY timeline points =
-    case ( timeline, points ) of
-        ( firstX :: restX, firstY :: restY ) ->
-            List.foldl
-                (\x ( axisY, acc ) ->
-                    case axisY of
-                        [] ->
-                            ( [], acc )
+mergePathsToLines : Dict String String -> Dict String (Data.Line a) -> List (Data.Line String)
+mergePathsToLines paths lines =
+    Dict.merge
+        {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
+        (\_ nextValue line -> Maybe.map ((::) (Data.setLineValue nextValue line)))
+        {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
+        paths
+        lines
+        (Just [])
+        |> Maybe.withDefault []
 
-                        y :: nextY ->
-                            ( nextY
-                            , acc ++ "L" ++ coordinate (mapX x) (mapY y)
-                            )
+
+barStep : (x -> Float) -> (y -> Float) -> x -> List ( String, y ) -> Dict String String -> Dict String String
+barStep mapX mapY x bunch acc =
+    List.foldr
+        (\( key, y ) ->
+            Dict.update key
+                (\result ->
+                    case result of
+                        Nothing ->
+                            Just ("M" ++ coordinate (mapX x) (mapY y))
+
+                        Just path ->
+                            Just (path ++ "L" ++ coordinate (mapX x) (mapY y))
                 )
-                ( restY, "M" ++ coordinate (mapX firstX) (mapY firstY) )
-                restX
-                |> Tuple.second
-
-        _ ->
-            ""
+        )
+        acc
+        bunch
 
 
-drawHelp : (Float -> Float) -> (Float -> Float) -> Timeline -> Lines -> List (Data.Line String)
-drawHelp mapX mapY timeline lines =
-    List.map
-        (Data.mapLineValue (drawStep mapX mapY timeline))
-        (Dict.values lines)
+barHelp : (Float -> Float) -> (Float -> Float) -> Limits -> Chart -> List (Data.Line String)
+barHelp mapX mapY limitsX chart =
+    let
+        ( _, paths ) =
+            Data.foldlChart
+                (\x bunch ( approximation, acc ) ->
+                    if x >= limitsX.min then
+                        if x <= limitsX.max then
+                            ( ToRight ( x, bunch )
+                            , case approximation of
+                                ToLeft ( prevX, prevBunch ) ->
+                                    let
+                                        scaleMin =
+                                            (limitsX.min - prevX) / (x - prevX)
+
+                                        bunchMin =
+                                            List.map2
+                                                (\( _, prevY ) ( key, y ) -> ( key, prevY + (y - prevY) * scaleMin ))
+                                                prevBunch
+                                                bunch
+                                    in
+                                    barStep mapX mapY x bunch (barStep mapX mapY limitsX.min bunchMin acc)
+
+                                _ ->
+                                    barStep mapX mapY x bunch acc
+                            )
+
+                        else
+                            ( NoApproximate
+                            , case approximation of
+                                ToLeft ( prevX, prevBunch ) ->
+                                    let
+                                        scaleMin =
+                                            (limitsX.min - prevX) / (x - prevX)
+
+                                        scaleMax =
+                                            (limitsX.max - prevX) / (x - prevX)
+
+                                        bunchMin =
+                                            List.map2
+                                                (\( _, prevY ) ( key, y ) -> ( key, prevY + (y - prevY) * scaleMin ))
+                                                prevBunch
+                                                bunch
+
+                                        bunchMax =
+                                            List.map2
+                                                (\( _, prevY ) ( key, y ) -> ( key, prevY + (y - prevY) * scaleMax ))
+                                                prevBunch
+                                                bunch
+                                    in
+                                    barStep mapX mapY limitsX.max bunchMax (barStep mapX mapY limitsX.min bunchMin acc)
+
+                                ToRight ( prevX, prevBunch ) ->
+                                    let
+                                        scaleMax =
+                                            (limitsX.max - prevX) / (x - prevX)
+
+                                        bunchMax =
+                                            List.map2
+                                                (\( _, prevY ) ( key, y ) -> ( key, prevY + (y - prevY) * scaleMax ))
+                                                prevBunch
+                                                bunch
+                                    in
+                                    barStep mapX mapY limitsX.max bunchMax acc
+
+                                _ ->
+                                    acc
+                            )
+
+                    else
+                        ( ToLeft ( x, bunch ), acc )
+                )
+                ( NoApproximate, Dict.empty )
+                chart
+    in
+    mergePathsToLines paths chart.lines
 
 
 easeOutQuad : Float -> Float
@@ -575,13 +619,13 @@ calcDoneLimit start end done =
     start + (end - start) * done
 
 
-draw : Settings -> Canvas -> List (Data.Line String)
-draw { animation } canvas =
+draw : Settings -> Chart -> Canvas -> List (Data.Line String)
+draw { animation } chart canvas =
     case canvas of
         Empty ->
             []
 
-        Static limitsX limitsY timeline lines ->
+        Static limitsX limitsY ->
             let
                 scaleX =
                     calcScale config.viewBox.width limitsX.min limitsX.max
@@ -589,13 +633,13 @@ draw { animation } canvas =
                 scaleY =
                     calcScale config.viewBox.height limitsY.min limitsY.max
             in
-            drawHelp
+            barHelp
                 (\x -> scaleX * (x - limitsX.min))
                 (\y -> scaleY * (limitsY.max - y))
-                timeline
-                lines
+                limitsX
+                chart
 
-        Animated countdown limitsX limitsYStart limitsYEnd timeline lines ->
+        Animated countdown limitsX limitsYStart limitsYEnd ->
             let
                 scaleX =
                     calcScale config.viewBox.width limitsX.min limitsX.max
@@ -612,11 +656,11 @@ draw { animation } canvas =
                 scaleY =
                     calcScale config.viewBox.height limitYMin limitYMax
             in
-            drawHelp
+            barHelp
                 (\x -> scaleX * (x - limitsX.min))
                 (\y -> scaleY * (limitYMax - y))
-                timeline
-                lines
+                limitsX
+                chart
 
 
 viewContainer : List (Html msg) -> Html msg
@@ -669,8 +713,8 @@ viewSelector range dragging =
         ]
 
 
-viewCanvas : Settings -> Canvas -> Html msg
-viewCanvas settings canvas =
+viewCanvas : Settings -> Chart -> Canvas -> Html msg
+viewCanvas settings chart canvas =
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         , Svg.Attributes.class (element "svg" [])
@@ -689,7 +733,7 @@ viewCanvas settings canvas =
                         []
                     )
                 )
-                (draw settings canvas)
+                (draw settings chart canvas)
             )
         ]
 
@@ -726,44 +770,30 @@ viewMinimap chart range dragging =
 
 foo : Chart -> List (Data.Line String)
 foo chart =
-    let
-        asd =
-            Data.foldlChart
-                (\x bunch acc ->
-                    { timeline = consToTimeline x acc.timeline
-                    , values = consToLines bunch acc.values
-                    }
-                )
-                { timeline = ( Nothing, [] )
-                , values = ( Nothing, Dict.empty )
-                }
-                chart
-    in
     case
-        ( Dict.merge
-            {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
-            (\lineId nextValue line -> Maybe.map (Dict.insert lineId (Data.setLineValue nextValue line)))
-            {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
-            (Tuple.second asd.values)
-            chart.lines
-            (Just Dict.empty)
-        , Tuple.first asd.timeline
-        , Maybe.map (\limits -> Limits (min 0 limits.min) (max 0 limits.max)) (Tuple.first asd.values)
-        )
+        Data.foldlChart
+            (\x bunch -> Tuple.mapBoth (mergeLimitX x) (mergeLimitY bunch))
+            ( Nothing, Just (Limits 0 0) )
+            chart
     of
-        ( Just lines, Just limitsX, Just limitsY ) ->
+        ( Just limitsX, Just limitsY ) ->
             let
                 scaleX =
                     calcScale config.viewBox.width limitsX.min limitsX.max
 
                 scaleY =
                     calcScale 60 limitsY.min limitsY.max
+
+                qwe =
+                    Data.foldlChart
+                        (barStep
+                            (\x -> scaleX * (x - limitsX.min))
+                            (\y -> scaleY * (limitsY.max - y))
+                        )
+                        Dict.empty
+                        chart
             in
-            drawHelp
-                (\x -> scaleX * (x - limitsX.min))
-                (\y -> scaleY * (limitsY.max - y))
-                (Tuple.second asd.timeline)
-                lines
+            mergePathsToLines qwe chart.lines
 
         _ ->
             []
@@ -774,7 +804,7 @@ view (Model settings chart state) =
     div
         [ Html.Attributes.class block
         ]
-        [ viewCanvas settings state.canvas
+        [ viewCanvas settings chart state.canvas
         , viewContainer
             [ viewMinimap chart state.range state.dragging
             ]
