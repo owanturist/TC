@@ -11,7 +11,7 @@ import Html.Keyed
 import Html.Lazy
 import Json.Decode as Decode exposing (Decoder)
 import Regex
-import Svg exposing (Svg, path, svg, g)
+import Svg exposing (Svg, g, path, svg)
 import Svg.Attributes
 import Svg.Keyed
 
@@ -378,12 +378,12 @@ draw { animation } viewBox chart status canvas =
 type alias Foo =
     { color : String
     , value : Float
-    , path : String
+    , breakpoint : Float
     }
 
 
-foo : ViewBox -> Float -> Float -> Foo
-foo { width } value breakpoint =
+foo : Float -> Float -> Foo
+foo value breakpoint =
     let
         color =
             if value == 0 then
@@ -394,7 +394,7 @@ foo { width } value breakpoint =
     in
     { color = color
     , value = value
-    , path = "M" ++ coordinate 0 breakpoint ++ "L" ++ coordinate (toFloat width) breakpoint
+    , breakpoint = breakpoint
     }
 
 
@@ -435,15 +435,18 @@ drawFoo { animation } viewBox chart status canvas =
                 stepsCountY =
                     5
 
+                paddingTop =
+                    26
+
                 fooY =
-                    ((limitsY.max - limitsY.min) / stepsCountY)
+                    ((limitsY.max - paddingTop / scaleY - limitsY.min) / stepsCountY)
                         |> round
                         |> toFloat
 
                 barY =
                     List.map
                         (\index ->
-                            foo viewBox (toFloat index * fooY) (toFloat (stepsCountY - index) * fooY * scaleY)
+                            foo (toFloat index * fooY) (toFloat (stepsCountY - index) * fooY * scaleY + paddingTop)
                         )
                         (List.range 0 stepsCountY)
             in
@@ -983,14 +986,30 @@ viewBreakpointsY breakpoints =
         []
         (List.map
             (\breakpoint ->
+                let
+                    d =
+                        "M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewBox.width) 0
+                in
                 ( String.fromFloat breakpoint.value
-                , path
-                    [ Svg.Attributes.stroke breakpoint.color
-                    , Svg.Attributes.strokeWidth "1"
-                    , Svg.Attributes.fill "none"
-                    , Svg.Attributes.d breakpoint.path
+                , g
+                    [ Svg.Attributes.transform ("translate(0, " ++ String.fromFloat breakpoint.breakpoint ++ ")")
                     ]
-                    [ Svg.text (String.fromFloat breakpoint.value)
+                    [ path
+                        [ Svg.Attributes.stroke breakpoint.color
+                        , Svg.Attributes.strokeWidth "1"
+                        , Svg.Attributes.fill "none"
+                        , Svg.Attributes.d d
+                        ]
+                        []
+                    , Svg.text_
+                        [ Svg.Attributes.y "-8"
+                        , Svg.Attributes.fontSize "14"
+                        , Svg.Attributes.fontWeight "100"
+                        , Svg.Attributes.fontFamily "sans-serif"
+                        , Svg.Attributes.fill "#afb9c1"
+                        ]
+                        [ Svg.text (String.fromFloat breakpoint.value)
+                        ]
                     ]
                 )
             )
