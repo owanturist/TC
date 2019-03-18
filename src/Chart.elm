@@ -11,7 +11,7 @@ import Html.Keyed
 import Html.Lazy
 import Json.Decode as Decode exposing (Decoder)
 import Regex
-import Svg exposing (Svg, path, svg)
+import Svg exposing (Svg, path, svg, g)
 import Svg.Attributes
 import Svg.Keyed
 
@@ -373,6 +373,112 @@ draw { animation } viewBox chart status canvas =
                 limitsX
                 chart
                 |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
+
+
+type alias Foo =
+    { color : String
+    , value : Float
+    , path : String
+    }
+
+
+foo : ViewBox -> Float -> Float -> Foo
+foo { width } value breakpoint =
+    let
+        color =
+            if value == 0 then
+                "#dce3ea"
+
+            else
+                "#f2f4f5"
+    in
+    { color = color
+    , value = value
+    , path = "M" ++ coordinate 0 breakpoint ++ "L" ++ coordinate (toFloat width) breakpoint
+    }
+
+
+drawFoo :
+    Settings
+    -> ViewBox
+    -> Chart
+    -> Status
+    -> Canvas
+    ->
+        { breakpointsY : List Foo
+        , lines : List ( Data.Line String, Visibility )
+        }
+drawFoo { animation } viewBox chart status canvas =
+    case canvas of
+        Empty ->
+            { breakpointsY = []
+            , lines = []
+            }
+
+        Static limitsX limitsY ->
+            let
+                scaleX =
+                    calcScale viewBox.width limitsX.min limitsX.max
+
+                scaleY =
+                    calcScale viewBox.height limitsY.min limitsY.max
+
+                lines =
+                    chart
+                        |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
+                        |> drawHelp
+                            (\x -> scaleX * (x - limitsX.min))
+                            (\y -> scaleY * (limitsY.max - y))
+                            limitsX
+                        |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
+
+                stepsCountY =
+                    5
+
+                fooY =
+                    ((limitsY.max - limitsY.min) / stepsCountY)
+                        |> round
+                        |> toFloat
+
+                barY =
+                    List.map
+                        (\index ->
+                            foo viewBox (toFloat index * fooY) (toFloat (stepsCountY - index) * fooY * scaleY)
+                        )
+                        (List.range 0 stepsCountY)
+            in
+            { breakpointsY = barY
+            , lines = lines
+            }
+
+        Animated countdown limitsX limitsYStart limitsYEnd ->
+            let
+                scaleX =
+                    calcScale viewBox.width limitsX.min limitsX.max
+
+                done =
+                    easeOutQuad (1 - countdown / animation.duration)
+
+                limitYMin =
+                    calcDoneLimit limitsYStart.min limitsYEnd.min done
+
+                limitYMax =
+                    calcDoneLimit limitsYStart.max limitsYEnd.max done
+
+                scaleY =
+                    calcScale viewBox.height limitYMin limitYMax
+
+                lines =
+                    drawHelp
+                        (\x -> scaleX * (x - limitsX.min))
+                        (\y -> scaleY * (limitYMax - y))
+                        limitsX
+                        chart
+                        |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
+            in
+            { breakpointsY = []
+            , lines = lines
+            }
 
 
 
@@ -838,8 +944,8 @@ viewSelector range dragging =
         ]
 
 
-viewPaths : Float -> Settings -> List ( Data.Line String, Visibility ) -> Svg msg
-viewPaths strokeWidth { animation } paths =
+viewLines : Float -> Settings -> List ( Data.Line String, Visibility ) -> Svg msg
+viewLines strokeWidth { animation } paths =
     Svg.Keyed.node "g"
         []
         (List.map
@@ -871,13 +977,39 @@ viewPaths strokeWidth { animation } paths =
         )
 
 
+viewBreakpointsY : List Foo -> Svg msg
+viewBreakpointsY breakpoints =
+    Svg.Keyed.node "g"
+        []
+        (List.map
+            (\breakpoint ->
+                ( String.fromFloat breakpoint.value
+                , path
+                    [ Svg.Attributes.stroke breakpoint.color
+                    , Svg.Attributes.strokeWidth "1"
+                    , Svg.Attributes.fill "none"
+                    , Svg.Attributes.d breakpoint.path
+                    ]
+                    [ Svg.text (String.fromFloat breakpoint.value)
+                    ]
+                )
+            )
+            breakpoints
+        )
+
+
 viewCanvas : Settings -> Chart -> Status -> Canvas -> Html msg
 viewCanvas settings chart status canvas =
+    let
+        asd =
+            drawFoo settings config.viewBox chart status canvas
+    in
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         , Svg.Attributes.class (element "svg" [])
         ]
-        [ viewPaths 2 settings (draw settings config.viewBox chart status canvas)
+        [ viewBreakpointsY asd.breakpointsY
+        , viewLines 2 settings asd.lines
         ]
 
 
@@ -894,7 +1026,7 @@ viewMinimap settings chart status range dragging minimap =
             [ Svg.Attributes.viewBox (makeViewBox viewBox)
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewPaths 1 settings (draw settings viewBox chart status minimap)
+            [ viewLines 1 settings (draw settings viewBox chart status minimap)
             ]
         , Html.Lazy.lazy2 viewSelector range dragging
         ]
