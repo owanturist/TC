@@ -4,7 +4,7 @@ import Browser.Events
 import DOM
 import Data
 import Dict exposing (Dict)
-import Html exposing (Html, div, input, label, text)
+import Html exposing (Html, div, input, label, span, text)
 import Html.Attributes
 import Html.Events
 import Html.Keyed
@@ -900,21 +900,49 @@ viewMinimap settings chart status range dragging minimap =
         ]
 
 
+viewCheckIcon : Svg msg
+viewCheckIcon =
+    svg
+        [ Svg.Attributes.viewBox "0 0 26 26"
+        , Svg.Attributes.class (element "icon" [])
+        ]
+        [ path
+            [ Svg.Attributes.d "m.3,14c-0.2-0.2-0.3-0.5-0.3-0.7s0.1-0.5 0.3-0.7l1.4-1.4c0.4-0.4 1-0.4 1.4,0l.1,.1 5.5,5.9c0.2,0.2 0.5,0.2 0.7,0l13.4-13.9h0.1v-8.88178e-16c0.4-0.4 1-0.4 1.4,0l1.4,1.4c0.4,0.4 0.4,1 0,1.4l0,0-16,16.6c-0.2,0.2-0.4,0.3-0.7,0.3-0.3,0-0.5-0.1-0.7-0.3l-7.8-8.4-.2-.3z"
+            ]
+            []
+        ]
+
+
 viewLineSwitcher : Bool -> Bool -> Data.Line a -> Html Msg
 viewLineSwitcher onlyOneSelected selected line =
-    div
-        []
-        [ label
-            []
-            [ input
-                [ Html.Attributes.type_ "checkbox"
-                , Html.Attributes.disabled (selected && onlyOneSelected)
-                , Html.Attributes.checked selected
-                , Html.Events.onCheck (\_ -> SelectLine line.id)
-                ]
+    let
+        disabled =
+            selected && onlyOneSelected
+
+        indicatorAttrs =
+            if disabled then
                 []
-            , text line.name
+
+            else
+                [ Html.Attributes.style "background" line.color
+                ]
+    in
+    label
+        [ Html.Attributes.class (element "line-switcher" [])
+        ]
+        [ input
+            [ Html.Attributes.class (element "line-checkbox" [])
+            , Html.Attributes.type_ "checkbox"
+            , Html.Attributes.disabled disabled
+            , Html.Attributes.checked selected
+            , Html.Events.onCheck (\_ -> SelectLine line.id)
             ]
+            []
+        , span
+            (Html.Attributes.class (element "line-indicator" []) :: indicatorAttrs)
+            [ viewCheckIcon
+            ]
+        , text line.name
         ]
 
 
@@ -938,7 +966,8 @@ viewLinesVisibility status lines =
                 lines
     in
     Html.Keyed.node "div"
-        []
+        [ Html.Attributes.class (element "legend" [])
+        ]
         (List.map
             (\( selected, line ) ->
                 ( line.id
