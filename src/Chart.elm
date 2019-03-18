@@ -317,7 +317,7 @@ drawSelected mapX mapY limitsX chart =
         |> mergePathsToLines chart.lines
 
 
-drawCanvas : Settings -> Chart -> Status -> Canvas -> List (Data.Line String)
+drawCanvas : Settings -> Chart -> Status -> Canvas -> List ( Data.Line String, Visibility )
 drawCanvas { animation } chart status canvas =
     case canvas of
         Empty ->
@@ -333,11 +333,7 @@ drawCanvas { animation } chart status canvas =
 
                 visibleLines =
                     Dict.filter
-                        (\lineId _ ->
-                            Dict.get lineId status
-                                |> Maybe.map isSelected
-                                |> Maybe.withDefault False
-                        )
+                        (\lineId _ -> Nothing /= Dict.get lineId status)
                         chart.lines
             in
             drawSelected
@@ -345,6 +341,7 @@ drawCanvas { animation } chart status canvas =
                 (\y -> scaleY * (limitsY.max - y))
                 limitsX
                 { chart | lines = visibleLines }
+                |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
         Animated countdown limitsX limitsYStart limitsYEnd ->
             let
@@ -368,10 +365,11 @@ drawCanvas { animation } chart status canvas =
                 (\y -> scaleY * (limitYMax - y))
                 limitsX
                 chart
+                |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
 
-drawMinimap : Chart -> List (Data.Line String)
-drawMinimap chart =
+drawMinimap : Chart -> Status -> List ( Data.Line String, Visibility )
+drawMinimap chart status =
     case
         Data.foldlChart
             (\x bunch -> Tuple.mapBoth (mergeLimitX x) (mergeLimitY bunch))
@@ -394,6 +392,7 @@ drawMinimap chart =
                 Dict.empty
                 chart
                 |> mergePathsToLines chart.lines
+                |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
         _ ->
             []
@@ -538,7 +537,7 @@ type Msg
     | StartSelectorAreaChanging Float Float
     | DragSelector Float
     | DragEndSelector Float
-    | SelectLine String Bool
+    | SelectLine String
     | Tick Float
 
 
@@ -578,14 +577,25 @@ update msg (Model settings chart state) =
                 chart
                 { state | dragging = NoDragging }
 
-        SelectLine lineId selected ->
+        SelectLine lineId ->
             let
                 nextStatus =
-                    if selected then
-                        Dict.insert lineId Visible state.status
+                    Dict.update lineId
+                        (\result ->
+                            case result of
+                                Nothing ->
+                                    Just (FadeIn settings.animation.duration)
 
-                    else
-                        Dict.remove lineId state.status
+                                Just Visible ->
+                                    Just (FadeOut settings.animation.duration)
+
+                                Just (FadeIn countdown) ->
+                                    Just (FadeOut (settings.animation.duration - countdown))
+
+                                Just (FadeOut countdown) ->
+                                    Just (FadeIn (settings.animation.duration - countdown))
+                        )
+                        state.status
             in
             Model settings
                 chart
@@ -595,20 +605,44 @@ update msg (Model settings chart state) =
                 }
 
         Tick delta ->
-            case state.canvas of
-                Animated countdown limitsX limitsYStart limitsYEnd ->
-                    let
-                        nextCanvas =
+            let
+                nextStatus =
+                    Dict.foldr
+                        (\lineId visibility acc ->
+                            case visibility of
+                                Visible ->
+                                    Dict.insert lineId Visible acc
+
+                                FadeIn countdown ->
+                                    if delta >= countdown then
+                                        Dict.insert lineId Visible acc
+
+                                    else
+                                        Dict.insert lineId (FadeIn (countdown - delta)) acc
+
+                                FadeOut countdown ->
+                                    if delta >= countdown then
+                                        acc
+
+                                    else
+                                        Dict.insert lineId (FadeOut (countdown - delta)) acc
+                        )
+                        Dict.empty
+                        state.status
+
+                nextCanvas =
+                    case state.canvas of
+                        Animated countdown limitsX limitsYStart limitsYEnd ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
                             else
                                 Animated (countdown - delta) limitsX limitsYStart limitsYEnd
-                    in
-                    Model settings chart { state | canvas = nextCanvas }
 
-                _ ->
-                    Model settings chart state
+                        _ ->
+                            state.canvas
+            in
+            Model settings chart { state | status = nextStatus, canvas = nextCanvas }
 
 
 
@@ -622,7 +656,23 @@ subscriptions (Model _ _ state) =
             Browser.Events.onAnimationFrameDelta Tick
 
         _ ->
-            Sub.none
+            if
+                Dict.foldr
+                    (\_ visibility acc ->
+                        case visibility of
+                            Visible ->
+                                acc
+
+                            _ ->
+                                True
+                    )
+                    False
+                    state.status
+            then
+                Browser.Events.onAnimationFrameDelta Tick
+
+            else
+                Sub.none
 
 
 
@@ -788,17 +838,30 @@ viewSelector range dragging =
         ]
 
 
-viewPaths : Float -> List (Data.Line String) -> Svg msg
-viewPaths strokeWidth paths =
+viewPaths : Float -> Settings -> List ( Data.Line String, Visibility ) -> Svg msg
+viewPaths strokeWidth { animation } paths =
     Svg.Keyed.node "g"
         []
         (List.map
-            (\line ->
+            (\( line, visibility ) ->
+                let
+                    opacity =
+                        case visibility of
+                            Visible ->
+                                1
+
+                            FadeIn countdown ->
+                                1 - countdown / animation.duration
+
+                            FadeOut countdown ->
+                                countdown / animation.duration
+                in
                 ( line.id
                 , path
                     [ Svg.Attributes.stroke line.color
                     , Svg.Attributes.strokeWidth (String.fromFloat strokeWidth)
                     , Svg.Attributes.fill "none"
+                    , Svg.Attributes.opacity (String.fromFloat opacity)
                     , Svg.Attributes.d line.value
                     ]
                     []
@@ -814,12 +877,12 @@ viewCanvas settings chart status canvas =
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         , Svg.Attributes.class (element "svg" [])
         ]
-        [ viewPaths 2 (drawCanvas settings chart status canvas)
+        [ viewPaths 2 settings (drawCanvas settings chart status canvas)
         ]
 
 
-viewMinimap : Chart -> Range -> Dragging -> Html Msg
-viewMinimap chart range dragging =
+viewMinimap : Settings -> Chart -> Status -> Range -> Dragging -> Html Msg
+viewMinimap settings chart status range dragging =
     div
         [ Html.Attributes.class (element "minimap" [])
         ]
@@ -827,7 +890,7 @@ viewMinimap chart range dragging =
             [ Svg.Attributes.viewBox (makeViewBox (ViewBox config.viewBox.width 60))
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewPaths 1 (drawMinimap chart)
+            [ viewPaths 1 settings (drawMinimap chart status)
             ]
         , Html.Lazy.lazy2 viewSelector range dragging
         ]
@@ -835,16 +898,19 @@ viewMinimap chart range dragging =
 
 viewLineSwitcher : Bool -> Bool -> Data.Line a -> Html Msg
 viewLineSwitcher onlyOneSelected selected line =
-    label
+    div
         []
-        [ input
-            [ Html.Attributes.type_ "checkbox"
-            , Html.Attributes.disabled (selected && onlyOneSelected)
-            , Html.Attributes.checked selected
-            , Html.Events.onCheck (SelectLine line.id)
-            ]
+        [ label
             []
-        , text line.name
+            [ input
+                [ Html.Attributes.type_ "checkbox"
+                , Html.Attributes.disabled (selected && onlyOneSelected)
+                , Html.Attributes.checked selected
+                , Html.Events.onCheck (\_ -> SelectLine line.id)
+                ]
+                []
+            , text line.name
+            ]
         ]
 
 
@@ -886,7 +952,7 @@ view (Model settings chart state) =
         ]
         [ viewCanvas settings chart state.status state.canvas
         , viewContainer
-            [ viewMinimap chart state.range state.dragging
+            [ viewMinimap settings chart state.status state.range state.dragging
             ]
         , viewContainer
             [ viewLinesVisibility (Dict.values chart.lines) state.status
