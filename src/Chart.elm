@@ -317,8 +317,8 @@ drawSelected mapX mapY limitsX chart =
         |> mergePathsToLines chart.lines
 
 
-drawCanvas : Settings -> Chart -> Status -> Canvas -> List ( Data.Line String, Visibility )
-drawCanvas { animation } chart status canvas =
+drawCanvas : Settings -> ViewBox -> Chart -> Status -> Canvas -> List ( Data.Line String, Visibility )
+drawCanvas { animation } viewBox chart status canvas =
     case canvas of
         Empty ->
             []
@@ -326,10 +326,10 @@ drawCanvas { animation } chart status canvas =
         Static limitsX limitsY ->
             let
                 scaleX =
-                    calcScale config.viewBox.width limitsX.min limitsX.max
+                    calcScale viewBox.width limitsX.min limitsX.max
 
                 scaleY =
-                    calcScale config.viewBox.height limitsY.min limitsY.max
+                    calcScale viewBox.height limitsY.min limitsY.max
 
                 visibleLines =
                     Dict.filter
@@ -346,7 +346,7 @@ drawCanvas { animation } chart status canvas =
         Animated countdown limitsX limitsYStart limitsYEnd ->
             let
                 scaleX =
-                    calcScale config.viewBox.width limitsX.min limitsX.max
+                    calcScale viewBox.width limitsX.min limitsX.max
 
                 done =
                     easeOutQuad (1 - countdown / animation.duration)
@@ -358,7 +358,7 @@ drawCanvas { animation } chart status canvas =
                     calcDoneLimit limitsYStart.max limitsYEnd.max done
 
                 scaleY =
-                    calcScale config.viewBox.height limitYMin limitYMax
+                    calcScale viewBox.height limitYMin limitYMax
             in
             drawSelected
                 (\x -> scaleX * (x - limitsX.min))
@@ -370,11 +370,17 @@ drawCanvas { animation } chart status canvas =
 
 drawMinimap : Chart -> Status -> List ( Data.Line String, Visibility )
 drawMinimap chart status =
+    let
+        visibleLines =
+            Dict.filter
+                (\lineId _ -> Nothing /= Dict.get lineId status)
+                chart.lines
+    in
     case
         Data.foldlChart
             (\x bunch -> Tuple.mapBoth (mergeLimitX x) (mergeLimitY bunch))
             ( Nothing, Just (Limits 0 0) )
-            chart
+            { chart | lines = visibleLines }
     of
         ( Just limitsX, Just limitsY ) ->
             let
@@ -504,6 +510,7 @@ type alias State =
     { range : Range
     , dragging : Dragging
     , status : Status
+    , minimap : Canvas
     , canvas : Canvas
     }
 
@@ -521,10 +528,13 @@ init settings chart =
         initialStatus =
             Dict.map (\_ _ -> Visible) chart.lines
 
+        initialMinimap =
+            select settings (Range 0 1) chart initialStatus Empty
+
         initialCanvas =
             select settings initialRange chart initialStatus Empty
     in
-    Model settings chart (State initialRange NoDragging initialStatus initialCanvas)
+    Model settings chart (State initialRange NoDragging initialStatus initialMinimap initialCanvas)
 
 
 
@@ -601,6 +611,7 @@ update msg (Model settings chart state) =
                 chart
                 { state
                     | status = nextStatus
+                    , minimap = select settings (Range 0 1) chart nextStatus state.minimap
                     , canvas = select settings state.range chart nextStatus state.canvas
                 }
 
@@ -630,6 +641,18 @@ update msg (Model settings chart state) =
                         Dict.empty
                         state.status
 
+                nextMinimap =
+                    case state.minimap of
+                        Animated countdown limitsX limitsYStart limitsYEnd ->
+                            if delta >= countdown then
+                                Static limitsX limitsYEnd
+
+                            else
+                                Animated (countdown - delta) limitsX limitsYStart limitsYEnd
+
+                        _ ->
+                            state.minimap
+
                 nextCanvas =
                     case state.canvas of
                         Animated countdown limitsX limitsYStart limitsYEnd ->
@@ -642,7 +665,13 @@ update msg (Model settings chart state) =
                         _ ->
                             state.canvas
             in
-            Model settings chart { state | status = nextStatus, canvas = nextCanvas }
+            Model settings
+                chart
+                { state
+                    | status = nextStatus
+                    , minimap = nextMinimap
+                    , canvas = nextCanvas
+                }
 
 
 
@@ -877,20 +906,24 @@ viewCanvas settings chart status canvas =
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         , Svg.Attributes.class (element "svg" [])
         ]
-        [ viewPaths 2 settings (drawCanvas settings chart status canvas)
+        [ viewPaths 2 settings (drawCanvas settings config.viewBox chart status canvas)
         ]
 
 
-viewMinimap : Settings -> Chart -> Status -> Range -> Dragging -> Html Msg
-viewMinimap settings chart status range dragging =
+viewMinimap : Settings -> Chart -> Status -> Range -> Dragging -> Canvas -> Html Msg
+viewMinimap settings chart status range dragging minimap =
+    let
+        viewBox =
+            ViewBox config.viewBox.width 60
+    in
     div
         [ Html.Attributes.class (element "minimap" [])
         ]
         [ svg
-            [ Svg.Attributes.viewBox (makeViewBox (ViewBox config.viewBox.width 60))
+            [ Svg.Attributes.viewBox (makeViewBox viewBox)
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewPaths 1 settings (drawMinimap chart status)
+            [ viewPaths 1 settings (drawCanvas settings viewBox chart status minimap)
             ]
         , Html.Lazy.lazy2 viewSelector range dragging
         ]
@@ -952,7 +985,7 @@ view (Model settings chart state) =
         ]
         [ viewCanvas settings chart state.status state.canvas
         , viewContainer
-            [ viewMinimap settings chart state.status state.range state.dragging
+            [ viewMinimap settings chart state.status state.range state.dragging state.minimap
             ]
         , viewContainer
             [ viewLinesVisibility (Dict.values chart.lines) state.status
