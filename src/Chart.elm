@@ -4,16 +4,16 @@ import Browser.Events
 import DOM
 import Data
 import Dict exposing (Dict)
-import Html exposing (Html, div)
+import Html exposing (Html, div, input, label, text)
 import Html.Attributes
 import Html.Events
+import Html.Keyed
 import Html.Lazy
 import Json.Decode as Decode exposing (Decoder)
 import Regex
 import Svg exposing (Svg, path, svg)
 import Svg.Attributes
 import Svg.Keyed
-import Svg.Lazy
 
 
 easeOutQuad : Float -> Float
@@ -170,20 +170,30 @@ selectHelp { from, to } firstX lastX x bunch acc =
         { acc | approximation = ToLeft ( position, x, List.map Tuple.second bunch ) }
 
 
-select : Range -> Settings -> Chart -> Canvas -> Canvas
-select range { animation } chart canvas =
+select : Settings -> Range -> Chart -> Status -> Canvas -> Canvas
+select { animation } range chart status canvas =
     let
-        ( firstX, lastX ) =
-            ( Data.firstChartX chart, Data.lastChartX chart )
+        visibleLines =
+            Dict.filter
+                (\lineId _ ->
+                    Dict.get lineId status
+                        |> Maybe.map isSelected
+                        |> Maybe.withDefault False
+                )
+                chart.lines
 
         { timeline, values } =
             Data.foldlChart
-                (selectHelp range firstX lastX)
+                (selectHelp
+                    range
+                    (Data.firstChartX chart)
+                    (Data.lastChartX chart)
+                )
                 { timeline = Nothing
                 , values = Just (Limits 0 0)
                 , approximation = NoApproximate
                 }
-                chart
+                { chart | lines = visibleLines }
     in
     case ( canvas, timeline, values ) of
         ( Empty, Just limitsX, Just limitsY ) ->
@@ -224,8 +234,8 @@ coordinate x y =
 drawHelp : (x -> Float) -> (y -> Float) -> x -> List ( String, y ) -> Dict String String -> Dict String String
 drawHelp mapX mapY x bunch acc =
     List.foldr
-        (\( key, y ) ->
-            Dict.update key
+        (\( lineId, y ) ->
+            Dict.update lineId
                 (\result ->
                     case result of
                         Nothing ->
@@ -243,7 +253,7 @@ drawSelected : (Float -> Float) -> (Float -> Float) -> Limits -> Chart -> List (
 drawSelected mapX mapY limitsX chart =
     let
         bunchBetween scale =
-            List.map2 (\( _, prevY ) ( key, y ) -> ( key, prevY + (y - prevY) * scale ))
+            List.map2 (\( _, prevY ) ( lineId, y ) -> ( lineId, prevY + (y - prevY) * scale ))
     in
     Data.foldlChart
         (\x bunch ( approximation, acc ) ->
@@ -307,8 +317,8 @@ drawSelected mapX mapY limitsX chart =
         |> mergePathsToLines chart.lines
 
 
-drawCanvas : Settings -> Chart -> Canvas -> List (Data.Line String)
-drawCanvas { animation } chart canvas =
+drawCanvas : Settings -> Chart -> Status -> Canvas -> List (Data.Line String)
+drawCanvas { animation } chart status canvas =
     case canvas of
         Empty ->
             []
@@ -320,12 +330,21 @@ drawCanvas { animation } chart canvas =
 
                 scaleY =
                     calcScale config.viewBox.height limitsY.min limitsY.max
+
+                visibleLines =
+                    Dict.filter
+                        (\lineId _ ->
+                            Dict.get lineId status
+                                |> Maybe.map isSelected
+                                |> Maybe.withDefault False
+                        )
+                        chart.lines
             in
             drawSelected
                 (\x -> scaleX * (x - limitsX.min))
                 (\y -> scaleY * (limitsY.max - y))
                 limitsX
-                chart
+                { chart | lines = visibleLines }
 
         Animated countdown limitsX limitsYStart limitsYEnd ->
             let
@@ -456,6 +475,26 @@ applyDragging dragging end =
                 }
 
 
+type Visibility
+    = Visible
+    | FadeIn Float
+    | FadeOut Float
+
+
+isSelected : Visibility -> Bool
+isSelected visibility =
+    case visibility of
+        FadeOut _ ->
+            False
+
+        _ ->
+            True
+
+
+type alias Status =
+    Dict String Visibility
+
+
 type Canvas
     = Empty
     | Static Limits Limits
@@ -465,6 +504,7 @@ type Canvas
 type alias State =
     { range : Range
     , dragging : Dragging
+    , status : Status
     , canvas : Canvas
     }
 
@@ -478,8 +518,14 @@ init settings chart =
     let
         initialRange =
             Range 0 1
+
+        initialStatus =
+            Dict.map (\_ _ -> Visible) chart.lines
+
+        initialCanvas =
+            select settings initialRange chart initialStatus Empty
     in
-    Model settings chart (State initialRange NoDragging (select initialRange settings chart Empty))
+    Model settings chart (State initialRange NoDragging initialStatus initialCanvas)
 
 
 
@@ -492,6 +538,7 @@ type Msg
     | StartSelectorAreaChanging Float Float
     | DragSelector Float
     | DragEndSelector Float
+    | SelectLine String Bool
     | Tick Float
 
 
@@ -523,13 +570,29 @@ update msg (Model settings chart state) =
                         chart
                         { state
                             | range = nextRange
-                            , canvas = select nextRange settings chart state.canvas
+                            , canvas = select settings nextRange chart state.status state.canvas
                         }
 
         DragEndSelector _ ->
             Model settings
                 chart
                 { state | dragging = NoDragging }
+
+        SelectLine lineId selected ->
+            let
+                nextStatus =
+                    if selected then
+                        Dict.insert lineId Visible state.status
+
+                    else
+                        Dict.remove lineId state.status
+            in
+            Model settings
+                chart
+                { state
+                    | status = nextStatus
+                    , canvas = select settings state.range chart nextStatus state.canvas
+                }
 
         Tick delta ->
             case state.canvas of
@@ -745,13 +808,13 @@ viewPaths strokeWidth paths =
         )
 
 
-viewCanvas : Settings -> Chart -> Canvas -> Html msg
-viewCanvas settings chart canvas =
+viewCanvas : Settings -> Chart -> Status -> Canvas -> Html msg
+viewCanvas settings chart status canvas =
     svg
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         , Svg.Attributes.class (element "svg" [])
         ]
-        [ Svg.Lazy.lazy (viewPaths 2) (drawCanvas settings chart canvas)
+        [ viewPaths 2 (drawCanvas settings chart status canvas)
         ]
 
 
@@ -764,10 +827,43 @@ viewMinimap chart range dragging =
             [ Svg.Attributes.viewBox (makeViewBox (ViewBox config.viewBox.width 60))
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ Svg.Lazy.lazy (viewPaths 1) (drawMinimap chart)
+            [ viewPaths 1 (drawMinimap chart)
             ]
         , Html.Lazy.lazy2 viewSelector range dragging
         ]
+
+
+viewLineSwitcher : Bool -> Data.Line a -> Html Msg
+viewLineSwitcher selected line =
+    label
+        []
+        [ input
+            [ Html.Attributes.type_ "checkbox"
+            , Html.Attributes.checked selected
+            , Html.Events.onCheck (SelectLine line.id)
+            ]
+            []
+        , text line.name
+        ]
+
+
+viewLinesVisibility : List (Data.Line a) -> Status -> Html Msg
+viewLinesVisibility lines status =
+    Html.Keyed.node "div"
+        []
+        (List.map
+            (\line ->
+                ( line.id
+                , viewLineSwitcher
+                    (Dict.get line.id status
+                        |> Maybe.map isSelected
+                        |> Maybe.withDefault False
+                    )
+                    line
+                )
+            )
+            lines
+        )
 
 
 view : Model -> Html Msg
@@ -775,8 +871,11 @@ view (Model settings chart state) =
     div
         [ Html.Attributes.class block
         ]
-        [ viewCanvas settings chart state.canvas
+        [ viewCanvas settings chart state.status state.canvas
         , viewContainer
             [ viewMinimap chart state.range state.dragging
+            ]
+        , viewContainer
+            [ viewLinesVisibility (Dict.values chart.lines) state.status
             ]
         ]
