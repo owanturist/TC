@@ -95,8 +95,16 @@ mergeLimitY bunch acc =
                 |> Just
 
 
-selectHelp : Range -> Float -> Float -> Float -> List ( String, Float ) -> Selection -> Selection
-selectHelp { from, to } firstX lastX x bunch acc =
+selectAll : Float -> List ( String, Float ) -> Selection -> Selection
+selectAll x bunch acc =
+    { timeline = mergeLimitX x acc.timeline
+    , values = mergeLimitY bunch acc.values
+    , approximation = acc.approximation
+    }
+
+
+selectWithRange : Range -> Float -> Float -> Float -> List ( String, Float ) -> Selection -> Selection
+selectWithRange { from, to } firstX lastX x bunch acc =
     let
         position =
             (x - firstX) / (lastX - firstX)
@@ -170,30 +178,33 @@ selectHelp { from, to } firstX lastX x bunch acc =
         { acc | approximation = ToLeft ( position, x, List.map Tuple.second bunch ) }
 
 
-select : Settings -> Range -> Chart -> Status -> Canvas -> Canvas
-select { animation } range chart status canvas =
+select : Settings -> Maybe Range -> Chart -> Status -> Canvas -> Canvas
+select { animation } mRange chart status canvas =
     let
-        visibleLines =
-            Dict.filter
-                (\lineId _ ->
-                    Dict.get lineId status
-                        |> Maybe.map isSelected
-                        |> Maybe.withDefault False
-                )
-                chart.lines
+        selectStep =
+            case mRange of
+                Nothing ->
+                    selectAll
+
+                Just range ->
+                    selectWithRange
+                        range
+                        (Data.firstChartX chart)
+                        (Data.lastChartX chart)
 
         { timeline, values } =
-            Data.foldlChart
-                (selectHelp
-                    range
-                    (Data.firstChartX chart)
-                    (Data.lastChartX chart)
-                )
-                { timeline = Nothing
-                , values = Just (Limits 0 0)
-                , approximation = NoApproximate
-                }
-                { chart | lines = visibleLines }
+            chart
+                |> Data.filterChartLines
+                    (\lineId _ ->
+                        Dict.get lineId status
+                            |> Maybe.map isSelected
+                            |> Maybe.withDefault False
+                    )
+                |> Data.foldlChart selectStep
+                    { timeline = Nothing
+                    , values = Just (Limits 0 0)
+                    , approximation = NoApproximate
+                    }
     in
     case ( canvas, timeline, values ) of
         ( Empty, Just limitsX, Just limitsY ) ->
@@ -231,8 +242,8 @@ coordinate x y =
     String.fromFloat x ++ "," ++ String.fromFloat y
 
 
-drawHelp : (x -> Float) -> (y -> Float) -> x -> List ( String, y ) -> Dict String String -> Dict String String
-drawHelp mapX mapY x bunch acc =
+drawStep : (x -> Float) -> (y -> Float) -> x -> List ( String, y ) -> Dict String String -> Dict String String
+drawStep mapX mapY x bunch acc =
     List.foldr
         (\( lineId, y ) ->
             Dict.update lineId
@@ -249,8 +260,8 @@ drawHelp mapX mapY x bunch acc =
         bunch
 
 
-drawSelected : (Float -> Float) -> (Float -> Float) -> Limits -> Chart -> List (Data.Line String)
-drawSelected mapX mapY limitsX chart =
+drawHelp : (Float -> Float) -> (Float -> Float) -> Limits -> Chart -> List (Data.Line String)
+drawHelp mapX mapY limitsX chart =
     let
         bunchBetween scale =
             List.map2 (\( _, prevY ) ( lineId, y ) -> ( lineId, prevY + (y - prevY) * scale ))
@@ -269,10 +280,10 @@ drawSelected mapX mapY limitsX chart =
                                 bunchMin =
                                     bunchBetween scaleMin prevBunch bunch
                             in
-                            drawHelp mapX mapY x bunch (drawHelp mapX mapY limitsX.min bunchMin acc)
+                            drawStep mapX mapY x bunch (drawStep mapX mapY limitsX.min bunchMin acc)
 
                         _ ->
-                            drawHelp mapX mapY x bunch acc
+                            drawStep mapX mapY x bunch acc
                     )
 
                 else
@@ -292,7 +303,7 @@ drawSelected mapX mapY limitsX chart =
                                 bunchMax =
                                     bunchBetween scaleMax prevBunch bunch
                             in
-                            drawHelp mapX mapY limitsX.max bunchMax (drawHelp mapX mapY limitsX.min bunchMin acc)
+                            drawStep mapX mapY limitsX.max bunchMax (drawStep mapX mapY limitsX.min bunchMin acc)
 
                         ToRight ( prevX, prevBunch ) ->
                             let
@@ -302,7 +313,7 @@ drawSelected mapX mapY limitsX chart =
                                 bunchMax =
                                     bunchBetween scaleMax prevBunch bunch
                             in
-                            drawHelp mapX mapY limitsX.max bunchMax acc
+                            drawStep mapX mapY limitsX.max bunchMax acc
 
                         _ ->
                             acc
@@ -314,11 +325,11 @@ drawSelected mapX mapY limitsX chart =
         ( NoApproximate, Dict.empty )
         chart
         |> Tuple.second
-        |> mergePathsToLines chart.lines
+        |> mergePathsToLines (Data.getChartLines chart)
 
 
-drawCanvas : Settings -> ViewBox -> Chart -> Status -> Canvas -> List ( Data.Line String, Visibility )
-drawCanvas { animation } viewBox chart status canvas =
+draw : Settings -> ViewBox -> Chart -> Status -> Canvas -> List ( Data.Line String, Visibility )
+draw { animation } viewBox chart status canvas =
     case canvas of
         Empty ->
             []
@@ -330,17 +341,13 @@ drawCanvas { animation } viewBox chart status canvas =
 
                 scaleY =
                     calcScale viewBox.height limitsY.min limitsY.max
-
-                visibleLines =
-                    Dict.filter
-                        (\lineId _ -> Nothing /= Dict.get lineId status)
-                        chart.lines
             in
-            drawSelected
-                (\x -> scaleX * (x - limitsX.min))
-                (\y -> scaleY * (limitsY.max - y))
-                limitsX
-                { chart | lines = visibleLines }
+            chart
+                |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
+                |> drawHelp
+                    (\x -> scaleX * (x - limitsX.min))
+                    (\y -> scaleY * (limitsY.max - y))
+                    limitsX
                 |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
         Animated countdown limitsX limitsYStart limitsYEnd ->
@@ -360,48 +367,12 @@ drawCanvas { animation } viewBox chart status canvas =
                 scaleY =
                     calcScale viewBox.height limitYMin limitYMax
             in
-            drawSelected
+            drawHelp
                 (\x -> scaleX * (x - limitsX.min))
                 (\y -> scaleY * (limitYMax - y))
                 limitsX
                 chart
                 |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
-
-
-drawMinimap : Chart -> Status -> List ( Data.Line String, Visibility )
-drawMinimap chart status =
-    let
-        visibleLines =
-            Dict.filter
-                (\lineId _ -> Nothing /= Dict.get lineId status)
-                chart.lines
-    in
-    case
-        Data.foldlChart
-            (\x bunch -> Tuple.mapBoth (mergeLimitX x) (mergeLimitY bunch))
-            ( Nothing, Just (Limits 0 0) )
-            { chart | lines = visibleLines }
-    of
-        ( Just limitsX, Just limitsY ) ->
-            let
-                scaleX =
-                    calcScale config.viewBox.width limitsX.min limitsX.max
-
-                scaleY =
-                    calcScale 60 limitsY.min limitsY.max
-            in
-            Data.foldlChart
-                (drawHelp
-                    (\x -> scaleX * (x - limitsX.min))
-                    (\y -> scaleY * (limitsY.max - y))
-                )
-                Dict.empty
-                chart
-                |> mergePathsToLines chart.lines
-                |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
-
-        _ ->
-            []
 
 
 
@@ -526,13 +497,13 @@ init settings chart =
             Range 0 1
 
         initialStatus =
-            Dict.map (\_ _ -> Visible) chart.lines
+            Dict.map (\_ _ -> Visible) (Data.getChartLines chart)
 
         initialMinimap =
-            select settings (Range 0 1) chart initialStatus Empty
+            select settings Nothing chart initialStatus Empty
 
         initialCanvas =
-            select settings initialRange chart initialStatus Empty
+            select settings (Just initialRange) chart initialStatus Empty
     in
     Model settings chart (State initialRange NoDragging initialStatus initialMinimap initialCanvas)
 
@@ -579,7 +550,7 @@ update msg (Model settings chart state) =
                         chart
                         { state
                             | range = nextRange
-                            , canvas = select settings nextRange chart state.status state.canvas
+                            , canvas = select settings (Just nextRange) chart state.status state.canvas
                         }
 
         DragEndSelector _ ->
@@ -611,8 +582,8 @@ update msg (Model settings chart state) =
                 chart
                 { state
                     | status = nextStatus
-                    , minimap = select settings (Range 0 1) chart nextStatus state.minimap
-                    , canvas = select settings state.range chart nextStatus state.canvas
+                    , minimap = select settings Nothing chart nextStatus state.minimap
+                    , canvas = select settings (Just state.range) chart nextStatus state.canvas
                 }
 
         Tick delta ->
@@ -906,7 +877,7 @@ viewCanvas settings chart status canvas =
         [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
         , Svg.Attributes.class (element "svg" [])
         ]
-        [ viewPaths 2 settings (drawCanvas settings config.viewBox chart status canvas)
+        [ viewPaths 2 settings (draw settings config.viewBox chart status canvas)
         ]
 
 
@@ -923,7 +894,7 @@ viewMinimap settings chart status range dragging minimap =
             [ Svg.Attributes.viewBox (makeViewBox viewBox)
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewPaths 1 settings (drawCanvas settings viewBox chart status minimap)
+            [ viewPaths 1 settings (draw settings viewBox chart status minimap)
             ]
         , Html.Lazy.lazy2 viewSelector range dragging
         ]
@@ -947,8 +918,8 @@ viewLineSwitcher onlyOneSelected selected line =
         ]
 
 
-viewLinesVisibility : List (Data.Line a) -> Status -> Html Msg
-viewLinesVisibility lines status =
+viewLinesVisibility : Status -> List (Data.Line a) -> Html Msg
+viewLinesVisibility status lines =
     let
         ( selectedCount, linesWithSelection ) =
             List.foldr
@@ -988,6 +959,6 @@ view (Model settings chart state) =
             [ viewMinimap settings chart state.status state.range state.dragging state.minimap
             ]
         , viewContainer
-            [ viewLinesVisibility (Dict.values chart.lines) state.status
+            [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
             ]
         ]

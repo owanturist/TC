@@ -1,7 +1,9 @@
 module Data exposing
     ( Chart
     , Line
+    , getChartLines
     , decode
+    , filterChartLines
     , firstChartX
     , foldlChart
     , lastChartX
@@ -107,30 +109,38 @@ coordinatesLast (Coordinates _ second rest) =
 -- C H A R T
 
 
-type alias Chart x y =
-    { timeline : Coordinates x
-    , lines : Dict String (Line (Coordinates y))
-    }
+type Chart x y
+    = Chart (Coordinates x) (Dict String (Line (Coordinates y)))
 
 
 firstChartX : Chart x y -> x
-firstChartX { timeline } =
+firstChartX (Chart timeline _) =
     coordinatesFirst timeline
 
 
 lastChartX : Chart x y -> x
-lastChartX { timeline } =
+lastChartX (Chart timeline _) =
     coordinatesLast timeline
 
 
 mapChartX : (a -> b) -> Chart a y -> Chart b y
-mapChartX fn { timeline, lines } =
+mapChartX fn (Chart timeline lines) =
     Chart (mapCoordinates fn timeline) lines
 
 
 mapChartY : (a -> b) -> Chart x a -> Chart x b
-mapChartY fn { timeline, lines } =
+mapChartY fn (Chart timeline lines) =
     Chart timeline (Dict.map (\_ -> mapLineValue (mapCoordinates fn)) lines)
+
+
+getChartLines : Chart x y -> Dict String (Line (Coordinates y))
+getChartLines (Chart _ lines) =
+    lines
+
+
+filterChartLines : (String -> Line (Coordinates y) -> Bool) -> Chart x y -> Chart x y
+filterChartLines fn (Chart timeline lines) =
+    Chart timeline (Dict.filter fn lines)
 
 
 foldChartNext : List ( key, List y ) -> Maybe ( List ( key, y ), List ( key, List y ) )
@@ -166,7 +176,7 @@ foldChartStep fn x ( acc, values ) =
 
 
 foldlChart : (x -> List ( String, y ) -> acc -> acc) -> acc -> Chart x y -> acc
-foldlChart fn acc { timeline, lines } =
+foldlChart fn acc (Chart timeline lines) =
     List.foldl
         (foldChartStep fn)
         ( acc
