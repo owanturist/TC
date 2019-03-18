@@ -833,12 +833,13 @@ viewMinimap chart range dragging =
         ]
 
 
-viewLineSwitcher : Bool -> Data.Line a -> Html Msg
-viewLineSwitcher selected line =
+viewLineSwitcher : Bool -> Bool -> Data.Line a -> Html Msg
+viewLineSwitcher onlyOneSelected selected line =
     label
         []
         [ input
             [ Html.Attributes.type_ "checkbox"
+            , Html.Attributes.disabled (selected && onlyOneSelected)
             , Html.Attributes.checked selected
             , Html.Events.onCheck (SelectLine line.id)
             ]
@@ -849,20 +850,32 @@ viewLineSwitcher selected line =
 
 viewLinesVisibility : List (Data.Line a) -> Status -> Html Msg
 viewLinesVisibility lines status =
+    let
+        ( selectedCount, linesWithSelection ) =
+            List.foldr
+                (\line ( count, acc ) ->
+                    if
+                        Dict.get line.id status
+                            |> Maybe.map isSelected
+                            |> Maybe.withDefault False
+                    then
+                        ( count + 1, ( True, line ) :: acc )
+
+                    else
+                        ( count, ( False, line ) :: acc )
+                )
+                ( 0, [] )
+                lines
+    in
     Html.Keyed.node "div"
         []
         (List.map
-            (\line ->
+            (\( selected, line ) ->
                 ( line.id
-                , viewLineSwitcher
-                    (Dict.get line.id status
-                        |> Maybe.map isSelected
-                        |> Maybe.withDefault False
-                    )
-                    line
+                , viewLineSwitcher (selectedCount < 2) selected line
                 )
             )
-            lines
+            linesWithSelection
         )
 
 
