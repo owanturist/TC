@@ -509,7 +509,7 @@ foobar viewBox steps limitsY =
         (\index ->
             let
                 y =
-                    index * round pps
+                    round (toFloat index * pps)
             in
             foo 1
                 y
@@ -567,10 +567,10 @@ bar viewBox steps done limitsYStart limitsYEnd =
         (\indexStart indexEnd ->
             let
                 startValue =
-                    indexStart * round ppsStart
+                    round (toFloat indexStart * ppsStart)
 
                 endValue =
-                    indexEnd * round ppsEnd
+                    round (toFloat indexEnd * ppsEnd)
             in
             if startValue == endValue then
                 [ foo 1
@@ -1163,26 +1163,38 @@ viewBreakpointsY breakpoints =
         (List.map
             (\breakpoint ->
                 ( String.fromInt breakpoint.value
-                , g
+                , path
                     [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat breakpoint.breakpoint ++ ")")
+                    , Svg.Attributes.stroke breakpoint.color
+                    , Svg.Attributes.strokeWidth "1"
+                    , Svg.Attributes.fill "none"
+                    , Svg.Attributes.opacity (String.fromFloat breakpoint.opacity)
+                    , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewBox.width) 0)
+                    ]
+                    []
+                )
+            )
+            breakpoints
+        )
+
+
+viewBreakpointsTextY : List Foo -> Svg msg
+viewBreakpointsTextY breakpoints =
+    Svg.Keyed.node "g"
+        []
+        (List.map
+            (\breakpoint ->
+                ( String.fromInt breakpoint.value
+                , Svg.text_
+                    [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat breakpoint.breakpoint ++ ")")
+                    , Svg.Attributes.y "-8"
+                    , Svg.Attributes.fontSize "14"
+                    , Svg.Attributes.fontWeight "300"
+                    , Svg.Attributes.fontFamily "sans-serif"
+                    , Svg.Attributes.fill "#afb9c1"
                     , Svg.Attributes.opacity (String.fromFloat breakpoint.opacity)
                     ]
-                    [ path
-                        [ Svg.Attributes.stroke breakpoint.color
-                        , Svg.Attributes.strokeWidth "1"
-                        , Svg.Attributes.fill "none"
-                        , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewBox.width) 0)
-                        ]
-                        []
-                    , Svg.text_
-                        [ Svg.Attributes.y "-8"
-                        , Svg.Attributes.fontSize "14"
-                        , Svg.Attributes.fontWeight "100"
-                        , Svg.Attributes.fontFamily "sans-serif"
-                        , Svg.Attributes.fill "#afb9c1"
-                        ]
-                        [ Svg.text (String.fromInt breakpoint.value)
-                        ]
+                    [ Svg.text (String.fromInt breakpoint.value)
                     ]
                 )
             )
@@ -1202,6 +1214,7 @@ viewCanvas settings chart status canvas =
         ]
         [ viewBreakpointsY asd.breakpointsY
         , viewLines 2 settings asd.lines
+        , viewBreakpointsTextY asd.breakpointsY
         ]
 
 
