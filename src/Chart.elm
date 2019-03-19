@@ -21,8 +21,8 @@ easeOutQuad delta =
     delta * (2 - delta)
 
 
-calcScale : Int -> Float -> Float -> Float
-calcScale side min max =
+calcScale : Int -> Limits -> Float
+calcScale side { min, max } =
     if min == max then
         0
 
@@ -337,10 +337,10 @@ draw { animation } viewBox chart status canvas =
         Static limitsX limitsY ->
             let
                 scaleX =
-                    calcScale viewBox.width limitsX.min limitsX.max
+                    calcScale viewBox.width limitsX
 
                 scaleY =
-                    calcScale viewBox.height limitsY.min limitsY.max
+                    calcScale viewBox.height limitsY
             in
             chart
                 |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
@@ -353,7 +353,7 @@ draw { animation } viewBox chart status canvas =
         Animated countdown limitsX limitsYStart limitsYEnd ->
             let
                 scaleX =
-                    calcScale viewBox.width limitsX.min limitsX.max
+                    calcScale viewBox.width limitsX
 
                 done =
                     easeOutQuad (1 - countdown / animation.duration)
@@ -365,7 +365,7 @@ draw { animation } viewBox chart status canvas =
                     calcDoneLimit limitsYStart.max limitsYEnd.max done
 
                 scaleY =
-                    calcScale viewBox.height limitYMin limitYMax
+                    calcScale viewBox.height (Limits limitYMin limitYMax)
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
@@ -377,12 +377,12 @@ draw { animation } viewBox chart status canvas =
 
 type alias Foo =
     { color : String
-    , value : Float
-    , breakpoint : Float
+    , value : Int
+    , breakpoint : Int
     }
 
 
-foo : Float -> Float -> Foo
+foo : Int -> Int -> Foo
 foo value breakpoint =
     let
         color =
@@ -393,45 +393,88 @@ foo value breakpoint =
                 "#f2f4f5"
     in
     { color = color
-    , value = toFloat (round value)
+    , value = value
     , breakpoint = breakpoint
     }
+
+
+ko : Int -> Limits -> Int -> ( Float, Int, Int )
+ko steps limits n =
+    if n + 1 >= steps then
+        ( abs limits.min / toFloat n
+        , n
+        , steps - n
+        )
+
+    else
+        let
+            s =
+                max (abs limits.min / toFloat n) (abs limits.max / toFloat (steps - n))
+        in
+        if toFloat n * s - abs limits.min <= s && toFloat (steps - n) * s - abs limits.max <= s then
+            ( s, n, steps - n )
+
+        else
+            ko steps limits (n + 1)
 
 
 bar : ViewBox -> Int -> Limits -> ( Limits, List Foo )
 bar viewBox steps limitsY =
     let
-        pointsPerStep =
-            (limitsY.max - limitsY.min) / toFloat steps
+        ( s, l, k ) =
+            if limitsY.min == 0 then
+                ( limitsY.max / toFloat steps, 0, steps )
 
-        stepsBelowZero =
-            floor (limitsY.min / pointsPerStep)
+            else if limitsY.max == 0 then
+                ( limitsY.min / toFloat steps, steps, 0 )
 
-        stepsAboveZero =
-            ceiling (limitsY.max / pointsPerStep)
+            else
+                ko steps limitsY 1
 
-        correctedPointsPerStep =
-            toFloat (stepsAboveZero - stepsBelowZero) * pointsPerStep / toFloat steps
+        -- let
+        --     stepsAboveZero =
+        --         (toFloat steps / (abs limitsY.min / abs limitsY.max + 1))
+        --             |> round
+        --             |> clamp 1 (steps - 1)
+        --             |> Debug.log "step"
+        --     stepsBelowZero =
+        --         stepsAboveZero - steps
+        --     kj =
+        --         Debug.log "lim" (ko 5 limitsY 1)
+        --     pointsPerStep =
+        --         max
+        --             (limitsY.min / toFloat stepsBelowZero)
+        --             (limitsY.max / toFloat stepsAboveZero)
+        -- in
+        -- Limits
+        --     (pointsPerStep * toFloat stepsBelowZero)
+        --     (pointsPerStep * toFloat stepsAboveZero)
 
-        correctedLimitsY =
+        from =
+            round (abs limitsY.min / limitsY.min) * l
+
+        to =
+            round (abs limitsY.max / limitsY.max) * k
+
+        kkj =
             Limits
-                (toFloat stepsBelowZero * correctedPointsPerStep)
-                (toFloat correctedStepsAboveZero * correctedPointsPerStep)
+                (s * toFloat from)
+                (s * toFloat to)
 
-        correctedStepsAboveZero =
-            steps + stepsBelowZero
+        pps =
+            (kkj.max - kkj.min) / toFloat steps
 
         scaleY =
-            calcScale viewBox.height correctedLimitsY.min correctedLimitsY.max
+            calcScale viewBox.height kkj * pps
     in
-    ( correctedLimitsY
+    ( kkj
     , List.map
         (\index ->
             foo
-                (toFloat index * correctedPointsPerStep)
-                (toFloat (correctedStepsAboveZero - index) * correctedPointsPerStep * scaleY)
+                (index * round pps)
+                (round (toFloat (to - index) * scaleY))
         )
-        (List.range stepsBelowZero correctedStepsAboveZero)
+        (List.range from to)
     )
 
 
@@ -454,14 +497,14 @@ drawFoo { animation } viewBox chart status canvas =
 
         Static limitsX limitsY ->
             let
-                (correctedLimitsY, breakpointsY) =
+                ( correctedLimitsY, breakpointsY ) =
                     bar viewBox 5 limitsY
 
                 scaleX =
-                    calcScale viewBox.width limitsX.min limitsX.max
+                    calcScale viewBox.width limitsX
 
                 scaleY =
-                    calcScale viewBox.height correctedLimitsY.min correctedLimitsY.max
+                    calcScale viewBox.height correctedLimitsY
 
                 lines =
                     chart
@@ -479,19 +522,25 @@ drawFoo { animation } viewBox chart status canvas =
         Animated countdown limitsX limitsYStart limitsYEnd ->
             let
                 scaleX =
-                    calcScale viewBox.width limitsX.min limitsX.max
+                    calcScale viewBox.width limitsX
+
+                ( correctedLimitsStartY, _ ) =
+                    bar viewBox 5 limitsYStart
+
+                ( correctedLimitsEndY, breakpointsY ) =
+                    bar viewBox 5 limitsYEnd
 
                 done =
                     easeOutQuad (1 - countdown / animation.duration)
 
                 limitYMin =
-                    calcDoneLimit limitsYStart.min limitsYEnd.min done
+                    calcDoneLimit correctedLimitsStartY.min correctedLimitsEndY.min done
 
                 limitYMax =
-                    calcDoneLimit limitsYStart.max limitsYEnd.max done
+                    calcDoneLimit correctedLimitsStartY.max correctedLimitsEndY.max done
 
                 scaleY =
-                    calcScale viewBox.height limitYMin limitYMax
+                    calcScale viewBox.height (Limits limitYMin limitYMax)
 
                 lines =
                     drawHelp
@@ -501,7 +550,7 @@ drawFoo { animation } viewBox chart status canvas =
                         chart
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
             in
-            { breakpointsY = []
+            { breakpointsY = breakpointsY
             , lines = lines
             }
 
@@ -1004,23 +1053,18 @@ viewLines strokeWidth { animation } paths =
 
 viewBreakpointsY : List Foo -> Svg msg
 viewBreakpointsY breakpoints =
-    Svg.Keyed.node "g"
+    g
         []
         (List.map
             (\breakpoint ->
-                let
-                    d =
-                        "M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewBox.width) 0
-                in
-                ( String.fromFloat breakpoint.value
-                , g
-                    [ Svg.Attributes.transform ("translate(0, " ++ String.fromFloat breakpoint.breakpoint ++ ")")
+                g
+                    [ Svg.Attributes.transform ("translate(0," ++ String.fromInt breakpoint.breakpoint ++ ")")
                     ]
                     [ path
                         [ Svg.Attributes.stroke breakpoint.color
                         , Svg.Attributes.strokeWidth "1"
                         , Svg.Attributes.fill "none"
-                        , Svg.Attributes.d d
+                        , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewBox.width) 0)
                         ]
                         []
                     , Svg.text_
@@ -1030,10 +1074,9 @@ viewBreakpointsY breakpoints =
                         , Svg.Attributes.fontFamily "sans-serif"
                         , Svg.Attributes.fill "#afb9c1"
                         ]
-                        [ Svg.text (String.fromFloat breakpoint.value)
+                        [ Svg.text (String.fromInt breakpoint.value)
                         ]
                     ]
-                )
             )
             breakpoints
         )
