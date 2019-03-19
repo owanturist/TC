@@ -233,7 +233,7 @@ select { animation } mRange chart status canvas =
                 else
                     Animated animation.duration limitsX prevLimitsY asd
 
-        ( Animated countdown _ limitsYStart limitsYEnd, Just limitsX, Just limitsY ) ->
+        ( Animated countdown _ limitsYStart limitsYEnd , Just limitsX, Just limitsY ) ->
             if mRange == Nothing then
                 if limitsYEnd == limitsY then
                     Animated countdown limitsX limitsYStart limitsYEnd
@@ -250,6 +250,7 @@ select { animation } mRange chart status canvas =
                         }
                         limitsY
 
+
             else
                 let
                     asd =
@@ -262,14 +263,13 @@ select { animation } mRange chart status canvas =
                     let
                         done =
                             easeOutQuad (1 - countdown / animation.duration)
-                    in
-                    Animated animation.duration
-                        limitsX
-                        { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
-                        , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
-                        }
-                        asd
 
+                        limitsYDone =
+                            { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
+                            , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
+                            }
+                    in
+                    Animated animation.duration limitsX limitsYDone asd
         _ ->
             Empty
 
@@ -387,7 +387,7 @@ draw { animation } viewBox chart status canvas =
                     limitsX
                 |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
-        Animated countdown limitsX limitsYStart limitsYEnd ->
+        Animated countdown limitsX limitsYStart limitsYEnd  ->
             let
                 scaleX =
                     calcScale viewBox.width limitsX
@@ -518,11 +518,14 @@ foobar viewBox steps limitsY =
         (List.range from to)
 
 
-bar : ViewBox -> Int -> Float -> Limits -> Limits -> List Foo
-bar viewBox steps done limitsYStart limitsYEnd =
+bar : Settings -> ViewBox -> Int -> Float -> Limits -> Limits -> List Foo
+bar { animation } viewBox steps countdown limitsYStart limitsYEnd =
     let
+        doneEnd =
+            easeOutQuad (1 - countdown / animation.duration)
+
         doneStart =
-            1 - done
+            1 - doneEnd
 
         ppsStart =
             (limitsYStart.max - limitsYStart.min) / toFloat steps
@@ -541,9 +544,6 @@ bar viewBox steps done limitsYStart limitsYEnd =
 
         scaleYStart =
             calcScale viewBox.height (Limits limitYStartMin limitYStartMax)
-
-        doneEnd =
-            done
 
         ppsEnd =
             (limitsYEnd.max - limitsYEnd.min) / toFloat steps
@@ -590,6 +590,7 @@ bar viewBox steps done limitsYStart limitsYEnd =
         (List.range fromStart toStart)
         (List.range fromEnd toEnd)
         |> List.concat
+        |> List.filter ((/=) 0 << .opacity)
 
 
 drawFoo :
@@ -630,7 +631,7 @@ drawFoo settings viewBox chart status canvas =
             , lines = lines
             }
 
-        Animated countdown limitsX limitsYStart limitsYEnd ->
+        Animated countdown limitsX limitsYStart limitsYEnd  ->
             let
                 scaleX =
                     calcScale viewBox.width limitsX
@@ -654,8 +655,9 @@ drawFoo settings viewBox chart status canvas =
                         limitsX
                         chart
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
+
             in
-            { breakpointsY = bar viewBox 5 done limitsYStart limitsYEnd
+            { breakpointsY = bar settings viewBox 5 countdown limitsYStart limitsYEnd
             , lines = lines
             }
 
@@ -899,7 +901,7 @@ update msg (Model settings chart state) =
 
                 nextMinimap =
                     case state.minimap of
-                        Animated countdown limitsX limitsYStart limitsYEnd ->
+                        Animated countdown limitsX limitsYStart limitsYEnd  ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
@@ -911,7 +913,7 @@ update msg (Model settings chart state) =
 
                 nextCanvas =
                     case state.canvas of
-                        Animated countdown limitsX limitsYStart limitsYEnd ->
+                        Animated countdown limitsX limitsYStart limitsYEnd  ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
@@ -937,7 +939,7 @@ update msg (Model settings chart state) =
 subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
     case state.canvas of
-        Animated _ _ _ _ ->
+        Animated _  _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
 
         _ ->
@@ -1125,7 +1127,7 @@ viewSelector range dragging =
 
 viewLines : Float -> Settings -> List ( Data.Line String, Visibility ) -> Svg msg
 viewLines strokeWidth { animation } paths =
-    Svg.Keyed.node "g"
+    g
         []
         (List.map
             (\( line, visibility ) ->
@@ -1141,8 +1143,7 @@ viewLines strokeWidth { animation } paths =
                             FadeOut countdown ->
                                 countdown / animation.duration
                 in
-                ( line.id
-                , path
+                path
                     [ Svg.Attributes.stroke line.color
                     , Svg.Attributes.strokeWidth (String.fromFloat strokeWidth)
                     , Svg.Attributes.fill "none"
@@ -1150,7 +1151,6 @@ viewLines strokeWidth { animation } paths =
                     , Svg.Attributes.d line.value
                     ]
                     []
-                )
             )
             paths
         )
@@ -1158,12 +1158,11 @@ viewLines strokeWidth { animation } paths =
 
 viewBreakpointsY : List Foo -> Svg msg
 viewBreakpointsY breakpoints =
-    Svg.Keyed.node "g"
+    g
         []
         (List.map
             (\breakpoint ->
-                ( String.fromInt breakpoint.value
-                , path
+                path
                     [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat breakpoint.breakpoint ++ ")")
                     , Svg.Attributes.stroke breakpoint.color
                     , Svg.Attributes.strokeWidth "1"
@@ -1172,7 +1171,6 @@ viewBreakpointsY breakpoints =
                     , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewBox.width) 0)
                     ]
                     []
-                )
             )
             breakpoints
         )
