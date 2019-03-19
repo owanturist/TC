@@ -420,8 +420,8 @@ type alias Foo =
     }
 
 
-foo : Int -> Float -> Foo
-foo value breakpoint =
+foo : Float -> Int -> Float -> Foo
+foo opacity value breakpoint =
     let
         color =
             if value == 0 then
@@ -433,7 +433,7 @@ foo value breakpoint =
     { color = color
     , value = value
     , breakpoint = breakpoint
-    , opacity = 1
+    , opacity = opacity
     }
 
 
@@ -511,7 +511,7 @@ foobar viewBox steps limitsY =
                 y =
                     index * round pps
             in
-            foo
+            foo 1
                 y
                 ((limitsY.max - toFloat y) * scaleY)
         )
@@ -534,10 +534,10 @@ bar viewBox steps done limitsYStart limitsYEnd =
             floor (limitsYStart.max / ppsStart)
 
         limitYStartMin =
-            calcDoneLimit  limitsYEnd.min limitsYStart.min doneStart
+            calcDoneLimit limitsYEnd.min limitsYStart.min doneStart
 
         limitYStartMax =
-            calcDoneLimit  limitsYEnd.max limitsYStart.max doneStart
+            calcDoneLimit limitsYEnd.max limitsYStart.max doneStart
 
         scaleYStart =
             calcScale viewBox.height (Limits limitYStartMin limitYStartMax)
@@ -555,10 +555,10 @@ bar viewBox steps done limitsYStart limitsYEnd =
             floor (limitsYEnd.max / ppsEnd)
 
         limitYEndMin =
-            calcDoneLimit  limitsYStart.min limitsYEnd.min doneEnd
+            calcDoneLimit limitsYStart.min limitsYEnd.min doneEnd
 
         limitYEndMax =
-            calcDoneLimit  limitsYStart.max limitsYEnd.max doneEnd
+            calcDoneLimit limitsYStart.max limitsYEnd.max doneEnd
 
         scaleYEnd =
             calcScale viewBox.height (Limits limitYEndMin limitYEndMax)
@@ -569,20 +569,23 @@ bar viewBox steps done limitsYStart limitsYEnd =
                 startValue =
                     indexStart * round ppsStart
 
-                fooStart =
-                    foo startValue
-                        ((limitYStartMax - toFloat startValue) * scaleYStart)
-
                 endValue =
                     indexEnd * round ppsEnd
-
-                fooEnd =
-                    foo endValue
-                        ((limitYEndMax - toFloat endValue) * scaleYEnd)
             in
-            [ { fooStart | opacity = doneStart }
-            , { fooEnd | opacity = doneEnd }
-            ]
+            if startValue == endValue then
+                [ foo 1
+                    startValue
+                    ((limitYStartMax - toFloat startValue) * scaleYStart)
+                ]
+
+            else
+                [ foo doneStart
+                    startValue
+                    ((limitYStartMax - toFloat startValue) * scaleYStart)
+                , foo doneEnd
+                    endValue
+                    ((limitYEndMax - toFloat endValue) * scaleYEnd)
+                ]
         )
         (List.range fromStart toStart)
         (List.range fromEnd toEnd)
@@ -1155,11 +1158,12 @@ viewLines strokeWidth { animation } paths =
 
 viewBreakpointsY : List Foo -> Svg msg
 viewBreakpointsY breakpoints =
-    g
+    Svg.Keyed.node "g"
         []
         (List.map
             (\breakpoint ->
-                g
+                ( String.fromInt breakpoint.value
+                , g
                     [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat breakpoint.breakpoint ++ ")")
                     , Svg.Attributes.opacity (String.fromFloat breakpoint.opacity)
                     ]
@@ -1180,6 +1184,7 @@ viewBreakpointsY breakpoints =
                         [ Svg.text (String.fromInt breakpoint.value)
                         ]
                     ]
+                )
             )
             breakpoints
         )
