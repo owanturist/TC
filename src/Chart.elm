@@ -470,14 +470,14 @@ baz : ViewBox -> Int -> Limits -> Limits
 baz viewBox steps limits =
     let
         ( s, l, k ) =
-                if limits.min == 0 then
-                    ( abs limits.max / toFloat steps, 0, steps )
+            if limits.min == 0 then
+                ( abs limits.max / toFloat steps, 0, steps )
 
-                else if limits.max == 0 then
-                    ( abs limits.min / toFloat steps, steps, 0 )
+            else if limits.max == 0 then
+                ( abs limits.min / toFloat steps, steps, 0 )
 
-                else
-                    ko steps limits 1
+            else
+                ko steps limits 1
 
         from =
             round (sign limits.min) * l
@@ -1126,7 +1126,7 @@ viewSelector range dragging =
 
 viewLines : Float -> Settings -> List ( Data.Line String, Visibility ) -> Svg msg
 viewLines strokeWidth { animation } paths =
-    g
+    Svg.Keyed.node "g"
         []
         (List.map
             (\( line, visibility ) ->
@@ -1142,7 +1142,8 @@ viewLines strokeWidth { animation } paths =
                             FadeOut countdown ->
                                 countdown / animation.duration
                 in
-                path
+                ( line.id
+                , path
                     [ Svg.Attributes.stroke line.color
                     , Svg.Attributes.strokeWidth (String.fromFloat strokeWidth)
                     , Svg.Attributes.fill "none"
@@ -1150,6 +1151,7 @@ viewLines strokeWidth { animation } paths =
                     , Svg.Attributes.d line.value
                     ]
                     []
+                )
             )
             paths
         )
@@ -1177,12 +1179,11 @@ viewBreakpointsY breakpoints =
 
 viewBreakpointsTextY : List Foo -> Svg msg
 viewBreakpointsTextY breakpoints =
-    Svg.Keyed.node "g"
+    g
         []
         (List.map
             (\breakpoint ->
-                ( String.fromInt breakpoint.value
-                , Svg.text_
+                Svg.text_
                     [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat breakpoint.breakpoint ++ ")")
                     , Svg.Attributes.y "-8"
                     , Svg.Attributes.fontSize "14"
@@ -1193,7 +1194,6 @@ viewBreakpointsTextY breakpoints =
                     ]
                     [ Svg.text (String.fromInt breakpoint.value)
                     ]
-                )
             )
             breakpoints
         )
