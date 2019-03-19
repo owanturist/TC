@@ -208,30 +208,66 @@ select { animation } mRange chart status canvas =
     in
     case ( canvas, timeline, values ) of
         ( Empty, Just limitsX, Just limitsY ) ->
-            Static limitsX limitsY
-
-        ( Static _ prevLimitsY, Just limitsX, Just limitsY ) ->
-            if prevLimitsY == limitsY then
+            if mRange == Nothing then
                 Static limitsX limitsY
 
             else
-                Animated animation.duration limitsX prevLimitsY limitsY
+                Static limitsX (baz config.viewBox 5 limitsY)
 
-        ( Animated countdown _ limitsYStart limitsYEnd, Just limitsX, Just limitsY ) ->
-            if limitsYEnd == limitsY then
-                Animated countdown limitsX limitsYStart limitsYEnd
+        ( Static _ prevLimitsY, Just limitsX, Just limitsY ) ->
+            if mRange == Nothing then
+                if prevLimitsY == limitsY then
+                    Static limitsX limitsY
+
+                else
+                    Animated animation.duration limitsX prevLimitsY limitsY
 
             else
                 let
-                    done =
-                        easeOutQuad (1 - countdown / animation.duration)
+                    asd =
+                        baz config.viewBox 5 limitsY
                 in
-                Animated animation.duration
-                    limitsX
-                    { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
-                    , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
-                    }
-                    limitsY
+                if prevLimitsY == asd then
+                    Static limitsX asd
+
+                else
+                    Animated animation.duration limitsX prevLimitsY asd
+
+        ( Animated countdown _ limitsYStart limitsYEnd, Just limitsX, Just limitsY ) ->
+            if mRange == Nothing then
+                if limitsYEnd == limitsY then
+                    Animated countdown limitsX limitsYStart limitsYEnd
+
+                else
+                    let
+                        done =
+                            easeOutQuad (1 - countdown / animation.duration)
+                    in
+                    Animated animation.duration
+                        limitsX
+                        { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
+                        , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
+                        }
+                        limitsY
+            else
+                let
+                    asd =
+                        baz config.viewBox 5 limitsY
+                in
+                if limitsYEnd == asd then
+                    Animated countdown limitsX limitsYStart limitsYEnd
+
+                else
+                    let
+                        done =
+                            easeOutQuad (1 - countdown / animation.duration)
+                    in
+                    Animated animation.duration
+                        limitsX
+                        { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
+                        , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
+                        }
+                        asd
 
         _ ->
             Empty
@@ -427,45 +463,52 @@ sign x =
         -1
 
 
-bar : ViewBox -> Int -> Limits -> ( Limits, List Foo )
-bar viewBox steps limitsY =
+baz : ViewBox -> Int -> Limits -> Limits
+baz viewBox steps limits =
     let
         ( s, l, k ) =
-            if limitsY.min == 0 then
-                ( limitsY.max / toFloat steps, 0, steps )
+            if limits.min == 0 then
+                ( limits.max / toFloat steps, 0, steps )
 
-            else if limitsY.max == 0 then
-                ( limitsY.min / toFloat steps, steps, 0 )
+            else if limits.max == 0 then
+                ( limits.min / toFloat steps, steps, 0 )
 
             else
-                ko steps limitsY 1
+                ko steps limits 1
 
         from =
-            round (sign limitsY.min) * l
+            round (sign limits.min) * l
 
         to =
-            round (sign limitsY.max) * k
+            round (sign limits.max) * k
+    in
+    Limits
+        (s * toFloat from)
+        (s * toFloat to)
 
-        kkj =
-            Limits
-                (s * toFloat from)
-                (s * toFloat to)
 
+bar : ViewBox -> Int -> Limits -> List Foo
+bar viewBox steps limitsY =
+    let
         pps =
-            (kkj.max - kkj.min) / toFloat steps
+            (limitsY.max - limitsY.min) / toFloat steps
+
+        from =
+            floor (limitsY.min / pps)
+
+        to =
+            floor (limitsY.max / pps)
 
         scaleY =
-            calcScale viewBox.height kkj * pps
+            calcScale viewBox.height limitsY * pps
     in
-    ( kkj
-    , List.map
+    List.map
         (\index ->
             foo
                 (index * round pps)
                 (round (toFloat (to - index) * scaleY))
         )
         (List.range from to)
-    )
 
 
 drawFoo :
@@ -487,25 +530,22 @@ drawFoo { animation } viewBox chart status canvas =
 
         Static limitsX limitsY ->
             let
-                ( correctedLimitsY, breakpointsY ) =
-                    bar viewBox 5 limitsY
-
                 scaleX =
                     calcScale viewBox.width limitsX
 
                 scaleY =
-                    calcScale viewBox.height correctedLimitsY
+                    calcScale viewBox.height limitsY
 
                 lines =
                     chart
                         |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
                         |> drawHelp
                             (\x -> scaleX * (x - limitsX.min))
-                            (\y -> scaleY * (correctedLimitsY.max - y))
+                            (\y -> scaleY * (limitsY.max - y))
                             limitsX
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
             in
-            { breakpointsY = breakpointsY
+            { breakpointsY = bar viewBox 5 limitsY
             , lines = lines
             }
 
@@ -514,20 +554,14 @@ drawFoo { animation } viewBox chart status canvas =
                 scaleX =
                     calcScale viewBox.width limitsX
 
-                ( correctedLimitsStartY, _ ) =
-                    bar viewBox 5 limitsYStart
-
-                ( correctedLimitsEndY, breakpointsY ) =
-                    bar viewBox 5 limitsYEnd
-
                 done =
                     easeOutQuad (1 - countdown / animation.duration)
 
                 limitYMin =
-                    calcDoneLimit correctedLimitsStartY.min correctedLimitsEndY.min done
+                    calcDoneLimit limitsYStart.min limitsYEnd.min done
 
                 limitYMax =
-                    calcDoneLimit correctedLimitsStartY.max correctedLimitsEndY.max done
+                    calcDoneLimit limitsYStart.max limitsYEnd.max done
 
                 scaleY =
                     calcScale viewBox.height (Limits limitYMin limitYMax)
@@ -540,7 +574,7 @@ drawFoo { animation } viewBox chart status canvas =
                         chart
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
             in
-            { breakpointsY = breakpointsY
+            { breakpointsY = bar viewBox 5 limitsYEnd
             , lines = lines
             }
 
