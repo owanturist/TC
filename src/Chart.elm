@@ -518,12 +518,9 @@ foobar viewBox steps limitsY =
         (List.range from to)
 
 
-bar : Settings -> ViewBox -> Int -> Float -> Limits -> Limits -> List Foo
-bar { animation } viewBox steps countdown limitsYStart limitsYEnd =
+bar : ViewBox -> Int -> Float -> Limits -> Limits -> List Foo
+bar viewBox steps done limitsYStart limitsYEnd =
     let
-        done =
-            1 - countdown / animation.duration
-
         doneStart =
             1 - done
 
@@ -537,10 +534,10 @@ bar { animation } viewBox steps countdown limitsYStart limitsYEnd =
             floor (limitsYStart.max / ppsStart)
 
         limitYStartMin =
-            calcDoneLimit limitsYStart.min limitsYEnd.min doneStart
+            calcDoneLimit  limitsYEnd.min limitsYStart.min doneStart
 
         limitYStartMax =
-            calcDoneLimit limitsYStart.max limitsYEnd.max doneStart
+            calcDoneLimit  limitsYEnd.max limitsYStart.max doneStart
 
         scaleYStart =
             calcScale viewBox.height (Limits limitYStartMin limitYStartMax)
@@ -558,10 +555,10 @@ bar { animation } viewBox steps countdown limitsYStart limitsYEnd =
             floor (limitsYEnd.max / ppsEnd)
 
         limitYEndMin =
-            calcDoneLimit limitsYEnd.min limitsYStart.min doneEnd
+            calcDoneLimit  limitsYStart.min limitsYEnd.min doneEnd
 
         limitYEndMax =
-            calcDoneLimit limitsYEnd.max limitsYStart.max doneEnd
+            calcDoneLimit  limitsYStart.max limitsYEnd.max doneEnd
 
         scaleYEnd =
             calcScale viewBox.height (Limits limitYEndMin limitYEndMax)
@@ -573,19 +570,18 @@ bar { animation } viewBox steps countdown limitsYStart limitsYEnd =
                     indexStart * round ppsStart
 
                 fooStart =
-                    foo
-                        endValue
+                    foo startValue
                         ((limitYStartMax - toFloat startValue) * scaleYStart)
 
                 endValue =
                     indexEnd * round ppsEnd
 
                 fooEnd =
-                    foo startValue
+                    foo endValue
                         ((limitYEndMax - toFloat endValue) * scaleYEnd)
             in
-            [ { fooStart | opacity = doneEnd }
-            , { fooEnd | opacity = doneStart }
+            [ { fooStart | opacity = doneStart }
+            , { fooEnd | opacity = doneEnd }
             ]
         )
         (List.range fromStart toStart)
@@ -656,7 +652,7 @@ drawFoo settings viewBox chart status canvas =
                         chart
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
             in
-            { breakpointsY = bar settings viewBox 5 countdown limitsYStart limitsYEnd
+            { breakpointsY = bar viewBox 5 done limitsYStart limitsYEnd
             , lines = lines
             }
 
