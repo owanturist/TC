@@ -5,5 +5,5 @@ import {
 } from './Main.elm';
 
 Elm.Main.init({
-    flags: fixture[ 1 ]
+    flags: fixture[ 0 ]
 });

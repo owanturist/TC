@@ -393,9 +393,46 @@ foo value breakpoint =
                 "#f2f4f5"
     in
     { color = color
-    , value = value
+    , value = toFloat (round value)
     , breakpoint = breakpoint
     }
+
+
+bar : ViewBox -> Int -> Limits -> ( Limits, List Foo )
+bar viewBox steps limitsY =
+    let
+        pointsPerStep =
+            (limitsY.max - limitsY.min) / toFloat steps
+
+        stepsBelowZero =
+            floor (limitsY.min / pointsPerStep)
+
+        stepsAboveZero =
+            ceiling (limitsY.max / pointsPerStep)
+
+        correctedPointsPerStep =
+            toFloat (stepsAboveZero - stepsBelowZero) * pointsPerStep / toFloat steps
+
+        correctedLimitsY =
+            Limits
+                (toFloat stepsBelowZero * correctedPointsPerStep)
+                (toFloat correctedStepsAboveZero * correctedPointsPerStep)
+
+        correctedStepsAboveZero =
+            steps + stepsBelowZero
+
+        scaleY =
+            calcScale viewBox.height correctedLimitsY.min correctedLimitsY.max
+    in
+    ( correctedLimitsY
+    , List.map
+        (\index ->
+            foo
+                (toFloat index * correctedPointsPerStep)
+                (toFloat (correctedStepsAboveZero - index) * correctedPointsPerStep * scaleY)
+        )
+        (List.range stepsBelowZero correctedStepsAboveZero)
+    )
 
 
 drawFoo :
@@ -417,40 +454,25 @@ drawFoo { animation } viewBox chart status canvas =
 
         Static limitsX limitsY ->
             let
+                (correctedLimitsY, breakpointsY) =
+                    bar viewBox 5 limitsY
+
                 scaleX =
                     calcScale viewBox.width limitsX.min limitsX.max
 
                 scaleY =
-                    calcScale viewBox.height limitsY.min limitsY.max
+                    calcScale viewBox.height correctedLimitsY.min correctedLimitsY.max
 
                 lines =
                     chart
                         |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
                         |> drawHelp
                             (\x -> scaleX * (x - limitsX.min))
-                            (\y -> scaleY * (limitsY.max - y))
+                            (\y -> scaleY * (correctedLimitsY.max - y))
                             limitsX
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
-
-                stepsCountY =
-                    5
-
-                paddingTop =
-                    26
-
-                fooY =
-                    ((limitsY.max - paddingTop / scaleY - limitsY.min) / stepsCountY)
-                        |> round
-                        |> toFloat
-
-                barY =
-                    List.map
-                        (\index ->
-                            foo (toFloat index * fooY) (toFloat (stepsCountY - index) * fooY * scaleY + paddingTop)
-                        )
-                        (List.range 0 stepsCountY)
             in
-            { breakpointsY = barY
+            { breakpointsY = breakpointsY
             , lines = lines
             }
 
