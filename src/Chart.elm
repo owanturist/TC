@@ -233,7 +233,7 @@ select { animation } mRange chart status canvas =
                 else
                     Animated animation.duration limitsX prevLimitsY asd
 
-        ( Animated countdown _ limitsYStart limitsYEnd , Just limitsX, Just limitsY ) ->
+        ( Animated countdown _ limitsYStart limitsYEnd, Just limitsX, Just limitsY ) ->
             if mRange == Nothing then
                 if limitsYEnd == limitsY then
                     Animated countdown limitsX limitsYStart limitsYEnd
@@ -249,7 +249,6 @@ select { animation } mRange chart status canvas =
                         , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
                         }
                         limitsY
-
 
             else
                 let
@@ -270,6 +269,7 @@ select { animation } mRange chart status canvas =
                             }
                     in
                     Animated animation.duration limitsX limitsYDone asd
+
         _ ->
             Empty
 
@@ -387,7 +387,7 @@ draw { animation } viewBox chart status canvas =
                     limitsX
                 |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
-        Animated countdown limitsX limitsYStart limitsYEnd  ->
+        Animated countdown limitsX limitsYStart limitsYEnd ->
             let
                 scaleX =
                     calcScale viewBox.width limitsX
@@ -470,14 +470,14 @@ baz : ViewBox -> Int -> Limits -> Limits
 baz viewBox steps limits =
     let
         ( s, l, k ) =
-            if limits.min == 0 then
-                ( limits.max / toFloat steps, 0, steps )
+                if limits.min == 0 then
+                    ( abs limits.max / toFloat steps, 0, steps )
 
-            else if limits.max == 0 then
-                ( limits.min / toFloat steps, steps, 0 )
+                else if limits.max == 0 then
+                    ( abs limits.min / toFloat steps, steps, 0 )
 
-            else
-                ko steps limits 1
+                else
+                    ko steps limits 1
 
         from =
             round (sign limits.min) * l
@@ -631,7 +631,7 @@ drawFoo settings viewBox chart status canvas =
             , lines = lines
             }
 
-        Animated countdown limitsX limitsYStart limitsYEnd  ->
+        Animated countdown limitsX limitsYStart limitsYEnd ->
             let
                 scaleX =
                     calcScale viewBox.width limitsX
@@ -655,7 +655,6 @@ drawFoo settings viewBox chart status canvas =
                         limitsX
                         chart
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
-
             in
             { breakpointsY = bar settings viewBox 5 countdown limitsYStart limitsYEnd
             , lines = lines
@@ -901,7 +900,7 @@ update msg (Model settings chart state) =
 
                 nextMinimap =
                     case state.minimap of
-                        Animated countdown limitsX limitsYStart limitsYEnd  ->
+                        Animated countdown limitsX limitsYStart limitsYEnd ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
@@ -913,7 +912,7 @@ update msg (Model settings chart state) =
 
                 nextCanvas =
                     case state.canvas of
-                        Animated countdown limitsX limitsYStart limitsYEnd  ->
+                        Animated countdown limitsX limitsYStart limitsYEnd ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
@@ -939,7 +938,7 @@ update msg (Model settings chart state) =
 subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
     case state.canvas of
-        Animated _  _ _ _ ->
+        Animated _ _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
 
         _ ->
