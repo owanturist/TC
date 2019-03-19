@@ -3,8 +3,8 @@ module Main exposing (main)
 import Browser
 import Chart
 import Data
-import Json.Decode as Decode exposing (Value)
 import Html exposing (code, text)
+import Json.Decode as Decode exposing (Value)
 import Time
 
 
@@ -12,7 +12,8 @@ import Time
 -- M O D E L
 
 
-type alias Model = Result Decode.Error Chart.Model
+type alias Model =
+    Result Decode.Error Chart.Model
 
 
 init : Value -> ( Model, Cmd Msg )
@@ -23,7 +24,8 @@ init json =
 
         Ok chart ->
             Chart.init
-                { animation =
+                { id = "0"
+                , animation =
                     { duration = 300
                     }
                 }
@@ -46,14 +48,12 @@ type alias Msg =
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msgOfChart model =
-    ( case model of
+    case model of
         Err err ->
-            Err err
+            ( Err err, Cmd.none )
 
         Ok chart ->
-            Ok (Chart.update msgOfChart chart)
-    , Cmd.none
-    )
+            Tuple.mapFirst Ok (Chart.update msgOfChart chart)
 
 
 
@@ -65,6 +65,7 @@ subscriptions model =
     case model of
         Err _ ->
             Sub.none
+
         Ok chart ->
             Chart.subscriptions chart
 
@@ -78,7 +79,8 @@ view model =
     Browser.Document "Charts"
         [ case model of
             Err err ->
-                code [] [text (Decode.errorToString err)]
+                code [] [ text (Decode.errorToString err) ]
+
             Ok chart ->
                 Chart.view chart
         ]

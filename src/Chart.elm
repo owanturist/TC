@@ -681,7 +681,8 @@ type alias Animation =
 
 
 type alias Settings =
-    { animation : Animation
+    { id : String
+    , animation : Animation
     }
 
 
@@ -805,44 +806,54 @@ type Msg
     | DragSelector Float
     | DragEndSelector Float
     | SelectLine String
+    | ScrollCanvas Float Float
     | Tick Float
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg (Model settings chart state) =
+    let
+        ( nextState, cmd ) =
+            updateHelp msg settings chart state
+    in
+    ( Model settings chart nextState, cmd )
+
+
+updateHelp : Msg -> Settings -> Chart -> State -> ( State, Cmd Msg )
+updateHelp msg settings chart state =
     case msg of
         StartSelectorFromChanging start width ->
-            Model settings
-                chart
-                { state | dragging = SelectorFromChanging state.range start width }
+            ( { state | dragging = SelectorFromChanging state.range start width }
+            , Cmd.none
+            )
 
         StartSelectorToChanging start width ->
-            Model settings
-                chart
-                { state | dragging = SelectorToChanging state.range start width }
+            ( { state | dragging = SelectorToChanging state.range start width }
+            , Cmd.none
+            )
 
         StartSelectorAreaChanging start width ->
-            Model settings
-                chart
-                { state | dragging = SelectorAreaChanging state.range start width }
+            ( { state | dragging = SelectorAreaChanging state.range start width }
+            , Cmd.none
+            )
 
         DragSelector end ->
-            case applyDragging state.dragging end of
+            ( case applyDragging state.dragging end of
                 Nothing ->
-                    Model settings chart state
+                    state
 
                 Just nextRange ->
-                    Model settings
-                        chart
-                        { state
-                            | range = nextRange
-                            , canvas = select settings (Just nextRange) chart state.status state.canvas
-                        }
+                    { state
+                        | range = nextRange
+                        , canvas = select settings (Just nextRange) chart state.status state.canvas
+                    }
+            , Cmd.none
+            )
 
         DragEndSelector _ ->
-            Model settings
-                chart
-                { state | dragging = NoDragging }
+            ( { state | dragging = NoDragging }
+            , Cmd.none
+            )
 
         SelectLine lineId ->
             let
@@ -864,13 +875,31 @@ update msg (Model settings chart state) =
                         )
                         state.status
             in
-            Model settings
-                chart
-                { state
-                    | status = nextStatus
-                    , minimap = select settings Nothing chart nextStatus state.minimap
-                    , canvas = select settings (Just state.range) chart nextStatus state.canvas
-                }
+            ( { state
+                | status = nextStatus
+                , minimap = select settings Nothing chart nextStatus state.minimap
+                , canvas = select settings (Just state.range) chart nextStatus state.canvas
+              }
+            , Cmd.none
+            )
+
+        ScrollCanvas scrollTop scrollWidth ->
+            let
+                width =
+                    state.range.to - state.range.from
+
+                from =
+                    clamp 0 (1 - width) (scrollTop / scrollWidth)
+
+                nextRange =
+                    Range from (width + from)
+            in
+            ( { state
+                | range = nextRange
+                , canvas = select settings (Just nextRange) chart state.status state.canvas
+              }
+            , Cmd.none
+            )
 
         Tick delta ->
             let
@@ -922,13 +951,13 @@ update msg (Model settings chart state) =
                         _ ->
                             state.canvas
             in
-            Model settings
-                chart
-                { state
-                    | status = nextStatus
-                    , minimap = nextMinimap
-                    , canvas = nextCanvas
-                }
+            ( { state
+                | status = nextStatus
+                , minimap = nextMinimap
+                , canvas = nextCanvas
+              }
+            , Cmd.none
+            )
 
 
 
@@ -963,6 +992,11 @@ subscriptions (Model _ _ state) =
 
 
 -- V I E W
+
+
+nodeID : String -> String -> String
+nodeID id name =
+    block ++ "__" ++ id ++ "__" ++ name
 
 
 block : String
@@ -1055,6 +1089,14 @@ withTouchX tagger =
     Decode.float
         |> Decode.at [ "changedTouches", "0", "pageX" ]
         |> Decode.map tagger
+
+
+withScrollTopAndWith : (Float -> Float -> msg) -> Decoder msg
+withScrollTopAndWith tagger =
+    Decode.map2 tagger
+        (Decode.field "scrollLeft" Decode.float)
+        (Decode.field "scrollWidth" Decode.float)
+        |> DOM.target
 
 
 withTouchXandSelectorWidth : (Float -> Float -> Msg) -> Decoder Msg
@@ -1199,19 +1241,39 @@ viewBreakpointsTextY breakpoints =
         )
 
 
-viewCanvas : Settings -> Chart -> Status -> Canvas -> Html msg
-viewCanvas settings chart status canvas =
+viewScroller : Settings -> Range -> Html Msg
+viewScroller settings range =
+    div
+        [ Html.Attributes.id (nodeID settings.id "scroller")
+        , Html.Attributes.class (element "scroller" [])
+        , Html.Events.on "scroll" (withScrollTopAndWith ScrollCanvas)
+        ]
+        [ div
+            [ Html.Attributes.class (element "scroller-content" [])
+            , Html.Attributes.style "width" (pct (100 / (range.to - range.from)))
+            ]
+            []
+        ]
+
+
+viewCanvas : Settings -> Chart -> Status -> Range -> Canvas -> Html Msg
+viewCanvas settings chart status range canvas =
     let
         asd =
             drawFoo settings config.viewBox chart status canvas
     in
-    svg
-        [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
-        , Svg.Attributes.class (element "svg" [])
+    div
+        [ Html.Attributes.class (element "canvas" [])
         ]
-        [ viewBreakpointsY asd.breakpointsY
-        , viewLines 2 settings asd.lines
-        , viewBreakpointsTextY asd.breakpointsY
+        [ svg
+            [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
+            , Svg.Attributes.class (element "svg" [])
+            ]
+            [ viewBreakpointsY asd.breakpointsY
+            , viewLines 2 settings asd.lines
+            , viewBreakpointsTextY asd.breakpointsY
+            ]
+        , viewScroller settings range
         ]
 
 
@@ -1317,7 +1379,7 @@ view (Model settings chart state) =
     div
         [ Html.Attributes.class block
         ]
-        [ viewCanvas settings chart state.status state.canvas
+        [ viewCanvas settings chart state.status state.range state.canvas
         , viewContainer
             [ viewMinimap settings chart state.status state.range state.dragging state.minimap
             ]
