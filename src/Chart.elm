@@ -249,6 +249,7 @@ select { animation } mRange chart status canvas =
                         , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
                         }
                         limitsY
+
             else
                 let
                     asd =
@@ -414,11 +415,12 @@ draw { animation } viewBox chart status canvas =
 type alias Foo =
     { color : String
     , value : Int
-    , breakpoint : Int
+    , breakpoint : Float
+    , opacity : Float
     }
 
 
-foo : Int -> Int -> Foo
+foo : Int -> Float -> Foo
 foo value breakpoint =
     let
         color =
@@ -431,6 +433,7 @@ foo value breakpoint =
     { color = color
     , value = value
     , breakpoint = breakpoint
+    , opacity = 1
     }
 
 
@@ -487,8 +490,8 @@ baz viewBox steps limits =
         (s * toFloat to)
 
 
-bar : ViewBox -> Int -> Limits -> List Foo
-bar viewBox steps limitsY =
+foobar : ViewBox -> Int -> Limits -> List Foo
+foobar viewBox steps limitsY =
     let
         pps =
             (limitsY.max - limitsY.min) / toFloat steps
@@ -500,15 +503,94 @@ bar viewBox steps limitsY =
             floor (limitsY.max / pps)
 
         scaleY =
-            calcScale viewBox.height limitsY * pps
+            calcScale viewBox.height limitsY
     in
     List.map
         (\index ->
+            let
+                y =
+                    index * round pps
+            in
             foo
-                (index * round pps)
-                (round (toFloat (to - index) * scaleY))
+                y
+                ((limitsY.max - toFloat y) * scaleY)
         )
         (List.range from to)
+
+
+bar : Settings -> ViewBox -> Int -> Float -> Limits -> Limits -> List Foo
+bar { animation } viewBox steps countdown limitsYStart limitsYEnd =
+    let
+        done =
+            1 - countdown / animation.duration
+
+        doneStart =
+            1 - done
+
+        ppsStart =
+            (limitsYStart.max - limitsYStart.min) / toFloat steps
+
+        fromStart =
+            floor (limitsYStart.min / ppsStart)
+
+        toStart =
+            floor (limitsYStart.max / ppsStart)
+
+        limitYStartMin =
+            calcDoneLimit limitsYStart.min limitsYEnd.min doneStart
+
+        limitYStartMax =
+            calcDoneLimit limitsYStart.max limitsYEnd.max doneStart
+
+        scaleYStart =
+            calcScale viewBox.height (Limits limitYStartMin limitYStartMax)
+
+        doneEnd =
+            done
+
+        ppsEnd =
+            (limitsYEnd.max - limitsYEnd.min) / toFloat steps
+
+        fromEnd =
+            floor (limitsYEnd.min / ppsEnd)
+
+        toEnd =
+            floor (limitsYEnd.max / ppsEnd)
+
+        limitYEndMin =
+            calcDoneLimit limitsYEnd.min limitsYStart.min doneEnd
+
+        limitYEndMax =
+            calcDoneLimit limitsYEnd.max limitsYStart.max doneEnd
+
+        scaleYEnd =
+            calcScale viewBox.height (Limits limitYEndMin limitYEndMax)
+    in
+    List.map2
+        (\indexStart indexEnd ->
+            let
+                startValue =
+                    indexStart * round ppsStart
+
+                fooStart =
+                    foo
+                        endValue
+                        ((limitYStartMax - toFloat startValue) * scaleYStart)
+
+                endValue =
+                    indexEnd * round ppsEnd
+
+                fooEnd =
+                    foo startValue
+                        ((limitYEndMax - toFloat endValue) * scaleYEnd)
+            in
+            [ { fooStart | opacity = doneEnd }
+            , { fooEnd | opacity = doneStart }
+            ]
+        )
+        (List.range fromStart toStart)
+        (List.range fromEnd toEnd)
+        |> List.concat
 
 
 drawFoo :
@@ -521,7 +603,7 @@ drawFoo :
         { breakpointsY : List Foo
         , lines : List ( Data.Line String, Visibility )
         }
-drawFoo { animation } viewBox chart status canvas =
+drawFoo settings viewBox chart status canvas =
     case canvas of
         Empty ->
             { breakpointsY = []
@@ -545,7 +627,7 @@ drawFoo { animation } viewBox chart status canvas =
                             limitsX
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
             in
-            { breakpointsY = bar viewBox 5 limitsY
+            { breakpointsY = foobar viewBox 5 limitsY
             , lines = lines
             }
 
@@ -555,7 +637,7 @@ drawFoo { animation } viewBox chart status canvas =
                     calcScale viewBox.width limitsX
 
                 done =
-                    easeOutQuad (1 - countdown / animation.duration)
+                    easeOutQuad (1 - countdown / settings.animation.duration)
 
                 limitYMin =
                     calcDoneLimit limitsYStart.min limitsYEnd.min done
@@ -574,7 +656,7 @@ drawFoo { animation } viewBox chart status canvas =
                         chart
                         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
             in
-            { breakpointsY = bar viewBox 5 limitsYEnd
+            { breakpointsY = bar settings viewBox 5 countdown limitsYStart limitsYEnd
             , lines = lines
             }
 
@@ -1082,7 +1164,8 @@ viewBreakpointsY breakpoints =
         (List.map
             (\breakpoint ->
                 g
-                    [ Svg.Attributes.transform ("translate(0," ++ String.fromInt breakpoint.breakpoint ++ ")")
+                    [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat breakpoint.breakpoint ++ ")")
+                    , Svg.Attributes.opacity (String.fromFloat breakpoint.opacity)
                     ]
                     [ path
                         [ Svg.Attributes.stroke breakpoint.color
