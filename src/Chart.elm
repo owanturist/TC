@@ -418,6 +418,15 @@ ko steps limits n =
             ko steps limits (n + 1)
 
 
+sign : number -> number
+sign x =
+    if x >= 0 then
+        1
+
+    else
+        -1
+
+
 bar : ViewBox -> Int -> Limits -> ( Limits, List Foo )
 bar viewBox steps limitsY =
     let
@@ -431,30 +440,11 @@ bar viewBox steps limitsY =
             else
                 ko steps limitsY 1
 
-        -- let
-        --     stepsAboveZero =
-        --         (toFloat steps / (abs limitsY.min / abs limitsY.max + 1))
-        --             |> round
-        --             |> clamp 1 (steps - 1)
-        --             |> Debug.log "step"
-        --     stepsBelowZero =
-        --         stepsAboveZero - steps
-        --     kj =
-        --         Debug.log "lim" (ko 5 limitsY 1)
-        --     pointsPerStep =
-        --         max
-        --             (limitsY.min / toFloat stepsBelowZero)
-        --             (limitsY.max / toFloat stepsAboveZero)
-        -- in
-        -- Limits
-        --     (pointsPerStep * toFloat stepsBelowZero)
-        --     (pointsPerStep * toFloat stepsAboveZero)
-
         from =
-            round (abs limitsY.min / limitsY.min) * l
+            round (sign limitsY.min) * l
 
         to =
-            round (abs limitsY.max / limitsY.max) * k
+            round (sign limitsY.max) * k
 
         kkj =
             Limits
