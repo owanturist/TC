@@ -21,6 +21,15 @@ easeOutQuad delta =
     delta * (2 - delta)
 
 
+sign : number -> number
+sign x =
+    if x >= 0 then
+        1
+
+    else
+        -1
+
+
 calcScale : Int -> Limits -> Float
 calcScale side { min, max } =
     if min == max then
@@ -33,6 +42,42 @@ calcScale side { min, max } =
 calcDoneLimit : Float -> Float -> Float -> Float
 calcDoneLimit start end done =
     start + (end - start) * done
+
+
+calcLimitsOverlap :
+    ViewBox
+    -> Float
+    -> Limits
+    -> Limits
+    ->
+        { min : Float
+        , max : Float
+        , scale : Float
+        }
+calcLimitsOverlap viewBox done limitsStart limitsEnd =
+    let
+        limitStartMin =
+            calcDoneLimit limitsStart.min limitsEnd.min done
+
+        limitStartMax =
+            calcDoneLimit limitsStart.max limitsEnd.max done
+    in
+    { min = limitStartMin
+    , max = limitStartMax
+    , scale = calcScale viewBox.height (Limits limitStartMin limitStartMax)
+    }
+
+
+calcPointsPerFraction : Int -> Limits -> Float
+calcPointsPerFraction fractionsCount limits =
+    (limits.max - limits.min) / toFloat fractionsCount
+
+
+generateFractionsRange : Float -> Limits -> List Int
+generateFractionsRange pointsPerFraction limits =
+    List.range
+        (floor (limits.min / pointsPerFraction))
+        (floor (limits.max / pointsPerFraction))
 
 
 mergePathsToLines : Dict String (Data.Line a) -> Dict String String -> List (Data.Line String)
@@ -396,46 +441,32 @@ draw { animation } viewBox chart status canvas =
                 done =
                     easeOutQuad (1 - countdown / animation.duration)
 
-                limitYMin =
-                    calcDoneLimit limitsYStart.min limitsYEnd.min done
-
-                limitYMax =
-                    calcDoneLimit limitsYStart.max limitsYEnd.max done
-
-                scaleY =
-                    calcScale viewBox.height (Limits limitYMin limitYMax)
+                overlapY =
+                    calcLimitsOverlap viewBox done limitsYStart limitsYEnd
             in
             drawHelp
                 (\x -> scaleX * (x - limitsX.min))
-                (\y -> scaleY * (limitYMax - y))
+                (\y -> overlapY.scale * (overlapY.max - y))
                 limitsX
                 chart
                 |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
 
-type alias Foo =
+type alias Fraction value =
     { color : String
-    , value : Int
-    , breakpoint : Float
     , opacity : Float
+    , value : value
+    , position : Float
     }
 
 
-foo : Float -> Int -> Float -> Foo
-foo opacity value breakpoint =
-    let
-        color =
-            if value == 0 then
-                "#dce3ea"
+fractionY : Float -> Int -> Float -> Fraction Int
+fractionY opacity value position =
+    if value == 0 then
+        Fraction "#dce3ea" opacity value position
 
-            else
-                "#f2f4f5"
-    in
-    { color = color
-    , value = value
-    , breakpoint = breakpoint
-    , opacity = opacity
-    }
+    else
+        Fraction "#f2f4f5" opacity value position
 
 
 ko : Int -> Limits -> Int -> ( Float, Int, Int )
@@ -456,15 +487,6 @@ ko steps limits n =
 
         else
             ko steps limits (n + 1)
-
-
-sign : number -> number
-sign x =
-    if x >= 0 then
-        1
-
-    else
-        -1
 
 
 baz : ViewBox -> Int -> Limits -> Limits
@@ -491,17 +513,11 @@ baz viewBox steps limits =
         (s * toFloat to)
 
 
-foobar : ViewBox -> Int -> Limits -> List Foo
-foobar viewBox steps limitsY =
+drawStaticFractionsY : ViewBox -> Int -> Limits -> List (Fraction Int)
+drawStaticFractionsY viewBox fractionsCount limitsY =
     let
-        pps =
-            (limitsY.max - limitsY.min) / toFloat steps
-
-        from =
-            floor (limitsY.min / pps)
-
-        to =
-            floor (limitsY.max / pps)
+        pointsPerFraction =
+            calcPointsPerFraction fractionsCount limitsY
 
         scaleY =
             calcScale viewBox.height limitsY
@@ -509,18 +525,18 @@ foobar viewBox steps limitsY =
     List.map
         (\index ->
             let
-                y =
-                    round (toFloat index * pps)
+                value =
+                    round (toFloat index * pointsPerFraction)
             in
-            foo 1
-                y
-                ((limitsY.max - toFloat y) * scaleY)
+            fractionY 1
+                value
+                ((limitsY.max - toFloat value) * scaleY)
         )
-        (List.range from to)
+        (generateFractionsRange pointsPerFraction limitsY)
 
 
-bar : Settings -> ViewBox -> Int -> Float -> Limits -> Limits -> List Foo
-bar { animation } viewBox steps countdown limitsYStart limitsYEnd =
+drawAnimatedFractionsY : Settings -> ViewBox -> Int -> Float -> Limits -> Limits -> List (Fraction Int)
+drawAnimatedFractionsY { animation } viewBox fractionsCount countdown limitsYStart limitsYEnd =
     let
         doneEnd =
             easeOutQuad (1 - countdown / animation.duration)
@@ -528,138 +544,59 @@ bar { animation } viewBox steps countdown limitsYStart limitsYEnd =
         doneStart =
             1 - doneEnd
 
-        ppsStart =
-            (limitsYStart.max - limitsYStart.min) / toFloat steps
+        pointsPerFractionStart =
+            calcPointsPerFraction fractionsCount limitsYStart
 
-        fromStart =
-            floor (limitsYStart.min / ppsStart)
+        overlapYStart =
+            calcLimitsOverlap viewBox doneStart limitsYEnd limitsYStart
 
-        toStart =
-            floor (limitsYStart.max / ppsStart)
+        pointsPerFractionEnd =
+            calcPointsPerFraction fractionsCount limitsYEnd
 
-        limitYStartMin =
-            calcDoneLimit limitsYEnd.min limitsYStart.min doneStart
-
-        limitYStartMax =
-            calcDoneLimit limitsYEnd.max limitsYStart.max doneStart
-
-        scaleYStart =
-            calcScale viewBox.height (Limits limitYStartMin limitYStartMax)
-
-        ppsEnd =
-            (limitsYEnd.max - limitsYEnd.min) / toFloat steps
-
-        fromEnd =
-            floor (limitsYEnd.min / ppsEnd)
-
-        toEnd =
-            floor (limitsYEnd.max / ppsEnd)
-
-        limitYEndMin =
-            calcDoneLimit limitsYStart.min limitsYEnd.min doneEnd
-
-        limitYEndMax =
-            calcDoneLimit limitsYStart.max limitsYEnd.max doneEnd
-
-        scaleYEnd =
-            calcScale viewBox.height (Limits limitYEndMin limitYEndMax)
+        overlapYEnd =
+            calcLimitsOverlap viewBox doneEnd limitsYStart limitsYEnd
     in
     List.map2
         (\indexStart indexEnd ->
             let
                 startValue =
-                    round (toFloat indexStart * ppsStart)
+                    round (toFloat indexStart * pointsPerFractionStart)
 
                 endValue =
-                    round (toFloat indexEnd * ppsEnd)
+                    round (toFloat indexEnd * pointsPerFractionEnd)
             in
             if startValue == endValue then
-                [ foo 1
+                [ fractionY 1
                     startValue
-                    ((limitYStartMax - toFloat startValue) * scaleYStart)
+                    ((overlapYStart.max - toFloat startValue) * overlapYStart.scale)
                 ]
 
             else
-                [ foo doneStart
+                [ fractionY doneStart
                     startValue
-                    ((limitYStartMax - toFloat startValue) * scaleYStart)
-                , foo doneEnd
+                    ((overlapYStart.max - toFloat startValue) * overlapYStart.scale)
+                , fractionY doneEnd
                     endValue
-                    ((limitYEndMax - toFloat endValue) * scaleYEnd)
+                    ((overlapYEnd.max - toFloat endValue) * overlapYEnd.scale)
                 ]
         )
-        (List.range fromStart toStart)
-        (List.range fromEnd toEnd)
+        (generateFractionsRange pointsPerFractionStart limitsYStart)
+        (generateFractionsRange pointsPerFractionEnd limitsYEnd)
         |> List.concat
         |> List.filter ((/=) 0 << .opacity)
 
 
-drawFoo :
-    Settings
-    -> ViewBox
-    -> Chart
-    -> Status
-    -> Canvas
-    ->
-        { breakpointsY : List Foo
-        , lines : List ( Data.Line String, Visibility )
-        }
-drawFoo settings viewBox chart status canvas =
+drawFractionsY : Settings -> ViewBox -> Canvas -> List (Fraction Int)
+drawFractionsY settings viewBox canvas =
     case canvas of
         Empty ->
-            { breakpointsY = []
-            , lines = []
-            }
+            []
 
-        Static limitsX limitsY ->
-            let
-                scaleX =
-                    calcScale viewBox.width limitsX
+        Static _ limitsY ->
+            drawStaticFractionsY viewBox 5 limitsY
 
-                scaleY =
-                    calcScale viewBox.height limitsY
-
-                lines =
-                    chart
-                        |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
-                        |> drawHelp
-                            (\x -> scaleX * (x - limitsX.min))
-                            (\y -> scaleY * (limitsY.max - y))
-                            limitsX
-                        |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
-            in
-            { breakpointsY = foobar viewBox 5 limitsY
-            , lines = lines
-            }
-
-        Animated _ countdown limitsX limitsYStart limitsYEnd ->
-            let
-                scaleX =
-                    calcScale viewBox.width limitsX
-
-                done =
-                    easeOutQuad (1 - countdown / settings.animation.duration)
-
-                limitYMin =
-                    calcDoneLimit limitsYStart.min limitsYEnd.min done
-
-                limitYMax =
-                    calcDoneLimit limitsYStart.max limitsYEnd.max done
-
-                scaleY =
-                    calcScale viewBox.height (Limits limitYMin limitYMax)
-
-                lines =
-                    drawHelp
-                        (\x -> scaleX * (x - limitsX.min))
-                        (\y -> scaleY * (limitYMax - y))
-                        limitsX
-                        chart
-                        |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
-            in
-            { breakpointsY = bar settings viewBox 5 countdown limitsYStart limitsYEnd
-            , lines = lines
-            }
+        Animated _ countdown _ limitsYStart limitsYEnd ->
+            drawAnimatedFractionsY settings viewBox 5 countdown limitsYStart limitsYEnd
 
 
 
@@ -979,12 +916,11 @@ subscriptions (Model _ _ state) =
             if
                 Dict.foldr
                     (\_ visibility acc ->
-                        case visibility of
-                            Visible ->
-                                acc
+                        if visibility == Visible then
+                            acc
 
-                            _ ->
-                                True
+                        else
+                            True
                     )
                     False
                     state.status
@@ -1204,45 +1140,45 @@ viewLines strokeWidth { animation } paths =
         )
 
 
-viewBreakpointsY : List Foo -> Svg msg
-viewBreakpointsY breakpoints =
+viewBreakpointsY : List (Fraction Int) -> Svg msg
+viewBreakpointsY fractions =
     g
         []
         (List.map
-            (\breakpoint ->
+            (\fraction ->
                 path
-                    [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat breakpoint.breakpoint ++ ")")
-                    , Svg.Attributes.stroke breakpoint.color
+                    [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat fraction.position ++ ")")
+                    , Svg.Attributes.stroke fraction.color
                     , Svg.Attributes.strokeWidth "1"
                     , Svg.Attributes.fill "none"
-                    , Svg.Attributes.opacity (String.fromFloat breakpoint.opacity)
+                    , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
                     , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewBox.width) 0)
                     ]
                     []
             )
-            breakpoints
+            fractions
         )
 
 
-viewBreakpointsTextY : List Foo -> Svg msg
-viewBreakpointsTextY breakpoints =
+viewBreakpointsTextY : List (Fraction Int) -> Svg msg
+viewBreakpointsTextY fractions =
     g
         []
         (List.map
-            (\breakpoint ->
+            (\fraction ->
                 Svg.text_
-                    [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat breakpoint.breakpoint ++ ")")
+                    [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat fraction.position ++ ")")
                     , Svg.Attributes.y "-8"
                     , Svg.Attributes.fontSize "14"
                     , Svg.Attributes.fontWeight "300"
                     , Svg.Attributes.fontFamily "sans-serif"
                     , Svg.Attributes.fill "#afb9c1"
-                    , Svg.Attributes.opacity (String.fromFloat breakpoint.opacity)
+                    , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
                     ]
-                    [ Svg.text (String.fromInt breakpoint.value)
+                    [ Svg.text (String.fromInt fraction.value)
                     ]
             )
-            breakpoints
+            fractions
         )
 
 
@@ -1264,8 +1200,8 @@ viewScroller settings range =
 viewCanvas : Settings -> Chart -> Status -> Range -> Canvas -> Html Msg
 viewCanvas settings chart status range canvas =
     let
-        asd =
-            drawFoo settings config.viewBox chart status canvas
+        foos =
+            drawFractionsY settings config.viewBox canvas
     in
     div
         [ Html.Attributes.class (element "canvas" [])
@@ -1274,9 +1210,9 @@ viewCanvas settings chart status range canvas =
             [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewBreakpointsY asd.breakpointsY
-            , viewLines 2 settings asd.lines
-            , viewBreakpointsTextY asd.breakpointsY
+            [ viewBreakpointsY foos
+            , viewLines 2 settings (draw settings config.viewBox chart status canvas)
+            , viewBreakpointsTextY foos
             ]
         , viewScroller settings range
         ]
