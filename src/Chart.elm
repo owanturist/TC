@@ -220,7 +220,7 @@ select { animation } mRange chart status canvas =
                     Static limitsX limitsY
 
                 else
-                    Animated animation.duration limitsX prevLimitsY limitsY
+                    Animated animation.delay animation.duration limitsX prevLimitsY limitsY
 
             else
                 let
@@ -231,19 +231,20 @@ select { animation } mRange chart status canvas =
                     Static limitsX asd
 
                 else
-                    Animated animation.duration limitsX prevLimitsY asd
+                    Animated animation.delay animation.duration limitsX prevLimitsY asd
 
-        ( Animated countdown _ limitsYStart limitsYEnd, Just limitsX, Just limitsY ) ->
+        ( Animated delay countdown _ limitsYStart limitsYEnd, Just limitsX, Just limitsY ) ->
             if mRange == Nothing then
                 if limitsYEnd == limitsY then
-                    Animated countdown limitsX limitsYStart limitsYEnd
+                    Animated delay countdown limitsX limitsYStart limitsYEnd
 
                 else
                     let
                         done =
                             easeOutQuad (1 - countdown / animation.duration)
                     in
-                    Animated animation.duration
+                    Animated delay
+                        animation.duration
                         limitsX
                         { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
                         , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
@@ -256,7 +257,7 @@ select { animation } mRange chart status canvas =
                         baz config.viewBox 5 limitsY
                 in
                 if limitsYEnd == asd then
-                    Animated countdown limitsX limitsYStart limitsYEnd
+                    Animated delay countdown limitsX limitsYStart limitsYEnd
 
                 else
                     let
@@ -268,7 +269,7 @@ select { animation } mRange chart status canvas =
                             , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
                             }
                     in
-                    Animated animation.duration limitsX limitsYDone asd
+                    Animated animation.delay animation.duration limitsX limitsYDone asd
 
         _ ->
             Empty
@@ -387,7 +388,7 @@ draw { animation } viewBox chart status canvas =
                     limitsX
                 |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
-        Animated countdown limitsX limitsYStart limitsYEnd ->
+        Animated _ countdown limitsX limitsYStart limitsYEnd ->
             let
                 scaleX =
                     calcScale viewBox.width limitsX
@@ -631,7 +632,7 @@ drawFoo settings viewBox chart status canvas =
             , lines = lines
             }
 
-        Animated countdown limitsX limitsYStart limitsYEnd ->
+        Animated _ countdown limitsX limitsYStart limitsYEnd ->
             let
                 scaleX =
                     calcScale viewBox.width limitsX
@@ -677,6 +678,7 @@ type alias Chart =
 
 type alias Animation =
     { duration : Float
+    , delay : Float
     }
 
 
@@ -761,7 +763,7 @@ type alias Status =
 type Canvas
     = Empty
     | Static Limits Limits
-    | Animated Float Limits Limits Limits
+    | Animated Float Float Limits Limits Limits
 
 
 type alias State =
@@ -929,24 +931,27 @@ updateHelp msg settings chart state =
 
                 nextMinimap =
                     case state.minimap of
-                        Animated countdown limitsX limitsYStart limitsYEnd ->
+                        Animated delay countdown limitsX limitsYStart limitsYEnd ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
                             else
-                                Animated (countdown - delta) limitsX limitsYStart limitsYEnd
+                                Animated delay (countdown - delta) limitsX limitsYStart limitsYEnd
 
                         _ ->
                             state.minimap
 
                 nextCanvas =
                     case state.canvas of
-                        Animated countdown limitsX limitsYStart limitsYEnd ->
+                        Animated delay countdown limitsX limitsYStart limitsYEnd ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
+                            else if delay >= delta then
+                                Animated (delay - delta) countdown limitsX limitsYStart limitsYEnd
+
                             else
-                                Animated (countdown - delta) limitsX limitsYStart limitsYEnd
+                                Animated 0 (countdown + delay - delta) limitsX limitsYStart limitsYEnd
 
                         _ ->
                             state.canvas
@@ -967,7 +972,7 @@ updateHelp msg settings chart state =
 subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
     case state.canvas of
-        Animated _ _ _ _ ->
+        Animated _ _ _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
 
         _ ->

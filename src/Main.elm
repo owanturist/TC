@@ -27,6 +27,7 @@ init json =
                 { id = "0"
                 , animation =
                     { duration = 300
+                    , delay = 100
                     }
                 }
                 (chart
