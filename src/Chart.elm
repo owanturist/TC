@@ -469,24 +469,32 @@ fractionY opacity value position =
         Fraction "#f2f4f5" opacity value position
 
 
-ko : Int -> Limits -> Int -> ( Float, Int, Int )
-ko steps limits n =
-    if n + 1 >= steps then
-        ( abs limits.min / toFloat n
-        , n
-        , steps - n
-        )
+jj : Int -> Limits -> ( Float, Int, Int )
+jj st lim =
+    let
+        absMin =
+            abs lim.min
+
+        absMax =
+            abs lim.max
+
+        kMin =
+            clamp 1 (st - 1) (floor (toFloat st / (absMax / absMin + 1)))
+
+        kMax =
+            clamp 1 (st - 1) (floor (toFloat st / (absMin / absMax + 1)))
+
+        qMin =
+            absMin / toFloat kMin
+
+        qMax =
+            absMax / toFloat kMax
+    in
+    if qMin > qMax then
+        ( qMax, st - kMax, kMax )
 
     else
-        let
-            s =
-                max (abs limits.min / toFloat n) (abs limits.max / toFloat (steps - n))
-        in
-        if toFloat n * s - abs limits.min <= s && toFloat (steps - n) * s - abs limits.max <= s then
-            ( s, n, steps - n )
-
-        else
-            ko steps limits (n + 1)
+        ( qMin, kMin, st - kMin )
 
 
 baz : ViewBox -> Int -> Limits -> Limits
@@ -500,13 +508,13 @@ baz viewBox steps limits =
                 ( abs limits.min / toFloat steps, steps, 0 )
 
             else
-                ko steps limits 1
+                jj steps limits
 
         from =
-            round (sign limits.min) * l
+            sign (round limits.min) * l
 
         to =
-            round (sign limits.max) * k
+            sign (round limits.max) * k
     in
     Limits
         (s * toFloat from)
@@ -525,12 +533,12 @@ drawStaticFractionsY viewBox fractionsCount limitsY =
     List.map
         (\index ->
             let
-                value =
-                    round (toFloat index * pointsPerFraction)
+                shift =
+                    toFloat index * pointsPerFraction
             in
             fractionY 1
-                value
-                ((limitsY.max - toFloat value) * scaleY)
+                (index * round pointsPerFraction)
+                ((limitsY.max - shift) * scaleY)
         )
         (generateFractionsRange pointsPerFraction limitsY)
 
@@ -560,24 +568,30 @@ drawAnimatedFractionsY { animation } viewBox fractionsCount countdown limitsYSta
         (\indexStart indexEnd ->
             let
                 startValue =
-                    round (toFloat indexStart * pointsPerFractionStart)
+                    indexStart * round pointsPerFractionStart
+
+                startShift =
+                    toFloat indexStart * pointsPerFractionStart
 
                 endValue =
-                    round (toFloat indexEnd * pointsPerFractionEnd)
+                    indexEnd * round pointsPerFractionEnd
+
+                endShift =
+                    toFloat indexEnd * pointsPerFractionEnd
             in
             if startValue == endValue then
                 [ fractionY 1
                     startValue
-                    ((overlapYStart.max - toFloat startValue) * overlapYStart.scale)
+                    ((overlapYStart.max - startShift) * overlapYStart.scale)
                 ]
 
             else
                 [ fractionY doneStart
                     startValue
-                    ((overlapYStart.max - toFloat startValue) * overlapYStart.scale)
+                    ((overlapYStart.max - startShift) * overlapYStart.scale)
                 , fractionY doneEnd
                     endValue
-                    ((overlapYEnd.max - toFloat endValue) * overlapYEnd.scale)
+                    ((overlapYEnd.max - endShift) * overlapYEnd.scale)
                 ]
         )
         (generateFractionsRange pointsPerFractionStart limitsYStart)
