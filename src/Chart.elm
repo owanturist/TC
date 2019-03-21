@@ -645,20 +645,95 @@ drawFractionsY settings canvas =
             drawAnimatedFractionsY settings countdown limitsYStart limitsYEnd
 
 
-remBy : Float -> Float -> Float
-remBy base x =
-    x - base * toFloat (truncate (x / base))
-
-
-drawStaticFractionsX : Limits -> Chart -> List (Fraction Time.Posix)
-drawStaticFractionsX limitsX chart =
+drawStaticFractionsXHelp : Float -> Float -> List Float -> Limits -> List (Fraction Time.Posix)
+drawStaticFractionsXHelp first last middle limitsX =
     let
         pointsPerFraction =
             calcPointsPerFraction config.fractionsCountX limitsX
 
         deltaX =
             limitsX.max - limitsX.min
+
+        ( _, { timestamps } ) =
+            List.foldr
+                (\timestamp ( index, acc ) ->
+                    ( index + 1
+                    , case acc.each of
+                        Nothing ->
+                            if (first + pointsPerFraction) <= timestamp then
+                                { each = Just index
+                                , timestamps = timestamp :: acc.timestamps
+                                }
+
+                            else
+                                acc
+
+                        Just each ->
+                            if remainderBy each index == 0 then
+                                { acc | timestamps = timestamp :: acc.timestamps }
+
+                            else
+                                acc
+                    )
+                )
+                ( 1
+                , { each = Nothing
+                  , timestamps = [ first ]
+                  }
+                )
+                middle
+
+        timestampsWithLast =
+            case timestamps of
+                [] ->
+                    []
+
+                preLast :: tail ->
+                    if (last - preLast) / pointsPerFraction > 0.5 then
+                        last :: preLast :: tail
+
+                    else
+                        last :: tail
+
+        ( _, fractions ) =
+            List.foldr
+                (\timestamp ( neighbour, acc ) ->
+                    if timestamp >= limitsX.min then
+                        if timestamp <= limitsX.max then
+                            ( Nothing
+                            , case neighbour of
+                                Just leftTimestamp ->
+                                    fractionX 1 (round leftTimestamp) ((leftTimestamp - limitsX.min) / deltaX)
+                                        :: fractionX 1 (round timestamp) ((timestamp - limitsX.min) / deltaX)
+                                        :: acc
+
+                                Nothing ->
+                                    fractionX 1 (round timestamp) ((timestamp - limitsX.min) / deltaX)
+                                        :: acc
+                            )
+
+                        else
+                            ( Just timestamp
+                            , if neighbour == Nothing then
+                                fractionX 1 (round timestamp) ((timestamp - limitsX.min) / deltaX) :: acc
+
+                              else
+                                acc
+                            )
+
+                    else
+                        ( Just timestamp
+                        , acc
+                        )
+                )
+                ( Nothing, [] )
+                timestampsWithLast
     in
+    fractions
+
+
+drawStaticFractionsX : Limits -> Chart -> List (Fraction Time.Posix)
+drawStaticFractionsX limitsX chart =
     case Data.getChartTimeline chart of
         [] ->
             []
@@ -669,45 +744,7 @@ drawStaticFractionsX limitsX chart =
                     []
 
                 last :: middle ->
-                    let
-                        ( _, { fractions } ) =
-                            List.foldr
-                                (\timestamp ( index, acc ) ->
-                                    ( index + 1
-                                    , case acc.each of
-                                        Nothing ->
-                                            if (first + pointsPerFraction) <= timestamp then
-                                                { each = Just index
-                                                , fractions = timestamp :: acc.fractions
-                                                }
-
-                                            else
-                                                acc
-
-                                        Just each ->
-                                            if remainderBy each index == 0 then
-                                                { acc | fractions = timestamp :: acc.fractions }
-
-                                            else
-                                                acc
-                                    )
-                                )
-                                ( 1
-                                , { each = Nothing
-                                  , fractions = [ first, last ]
-                                  }
-                                )
-                                middle
-                    in
-                    List.filterMap
-                        (\timestamp ->
-                            if limitsX.min <= timestamp && timestamp <= limitsX.max then
-                                Just (fractionX 1 (round timestamp) ((timestamp - limitsX.min) / deltaX))
-
-                            else
-                                Nothing
-                        )
-                        fractions
+                    drawStaticFractionsXHelp first last middle limitsX
 
 
 drawFractionsX : Settings -> Chart -> Canvas -> List (Fraction Time.Posix)
@@ -1240,7 +1277,7 @@ px value =
 
 pct : Float -> String
 pct value =
-    String.fromFloat (100 * (roundFor 4 value)) ++ "%"
+    String.fromFloat (100 * roundFor 4 value) ++ "%"
 
 
 viewContainer : List (Html msg) -> Html msg
@@ -1383,7 +1420,7 @@ viewFractionsX viewport fractions =
             (\fraction ->
                 span
                     [ Html.Attributes.class (element "fraction-x" [])
-                    , Html.Attributes.style "left" (pct ( fraction.position))
+                    , Html.Attributes.style "left" (pct fraction.position)
                     , Html.Attributes.style "width" (pct fractionWidth)
                     , Html.Attributes.style "opacity" (String.fromFloat fraction.opacity)
                     ]
