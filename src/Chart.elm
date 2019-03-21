@@ -872,6 +872,12 @@ type Canvas
     | Animated Float Limits Limits Limits
 
 
+type An a b
+    = Stat a
+    | Del Float a b
+    | Anim Float a b
+
+
 type alias Viewport =
     { width : Float
     , height : Float
@@ -1408,8 +1414,8 @@ posixToDateString zone posix =
     monthToDateString (Time.toMonth zone posix) ++ " " ++ String.fromInt (Time.toDay zone posix)
 
 
-viewFractionsX : Viewport -> List (Fraction Time.Posix) -> Html msg
-viewFractionsX viewport fractions =
+viewFractionsX : List (Fraction Time.Posix) -> Html msg
+viewFractionsX fractions =
     let
         fractionWidth =
             1 / toFloat (List.length fractions)
@@ -1488,8 +1494,8 @@ viewScroller settings range =
         ]
 
 
-viewCanvas : Settings -> Viewport -> Chart -> Status -> Range -> Canvas -> Html Msg
-viewCanvas settings viewport chart status range canvas =
+viewCanvas : Settings -> Chart -> Status -> Range -> Canvas -> Html Msg
+viewCanvas settings chart status range canvas =
     let
         fractionsX =
             drawFractionsX settings chart canvas
@@ -1508,7 +1514,7 @@ viewCanvas settings viewport chart status range canvas =
             , viewLines 2 settings (draw settings config.viewbox chart status canvas)
             , viewFractionsTextY fractionsY
             ]
-        , viewFractionsX viewport fractionsX
+        , viewFractionsX fractionsX
         , viewScroller settings range
         ]
 
@@ -1616,17 +1622,11 @@ view (Model settings chart state) =
         [ Html.Attributes.id (nodeID settings.id "root")
         , Html.Attributes.class block
         ]
-        (case state.viewport of
-            Nothing ->
-                []
-
-            Just viewport ->
-                [ viewCanvas settings viewport chart state.status state.range state.canvas
-                , viewContainer
-                    [ viewMinimap settings chart state.status state.range state.dragging state.minimap
-                    ]
-                , viewContainer
-                    [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
-                    ]
-                ]
-        )
+        [ viewCanvas settings chart state.status state.range state.canvas
+        , viewContainer
+            [ viewMinimap settings chart state.status state.range state.dragging state.minimap
+            ]
+        , viewContainer
+            [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
+            ]
+        ]
