@@ -76,14 +76,15 @@ calcPointsPerFraction fractionsCount limits =
 
 mergePathsToLines : Dict String (Data.Line a) -> Dict String String -> List (Data.Line String)
 mergePathsToLines lines paths =
-    Dict.merge
-        {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
-        (\_ nextValue line -> Maybe.map ((::) (Data.setLineValue nextValue line)))
-        {- indicate a difference between input and output lineIds dicts -} (\_ _ _ -> Nothing)
-        paths
-        lines
-        (Just [])
-        |> Maybe.withDefault []
+    let
+        {- indicate a difference between input and output lineIds dicts -}
+        erase _ _ _ =
+            Nothing
+
+        merge _ nextValue line =
+            Maybe.map ((::) (Data.setLineValue nextValue line))
+    in
+    Maybe.withDefault [] (Dict.merge erase merge erase paths lines (Just []))
 
 
 approximate : (value -> value -> value) -> List value -> List ( key, value ) -> List ( key, value )
