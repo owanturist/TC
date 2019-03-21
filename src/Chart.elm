@@ -271,6 +271,44 @@ isTransitionRun transition =
             True
 
 
+selectTransitionX : Settings -> Limits -> Transition Limits -> Transition Limits
+selectTransitionX { animation } limitsX transition =
+    let
+        deltaX =
+            limitsX.max - limitsX.min
+    in
+    case transition of
+        Stat prevLimitsX ->
+            if prevLimitsX.max - prevLimitsX.min == deltaX then
+                Stat limitsX
+
+            else
+                Del animation.delay prevLimitsX limitsX
+
+        Del countdown limitsXStart limitsXEnd ->
+            if limitsXEnd.max - limitsXEnd.min == deltaX then
+                Del countdown limitsXEnd limitsX
+
+            else
+                Del animation.delay limitsXEnd limitsX
+
+        Anim countdown limitsXStart limitsXEnd ->
+            if limitsXEnd.max - limitsXEnd.min == deltaX then
+                Anim countdown limitsXEnd limitsX
+
+            else
+                let
+                    done =
+                        easeOutQuad (1 - countdown / animation.duration)
+
+                    doneLimits =
+                        Limits
+                            (calcDone limitsXStart.min limitsXEnd.min done)
+                            (calcDone limitsXStart.max limitsXEnd.max done)
+                in
+                Anim animation.duration doneLimits limitsX
+
+
 selectTransitionY : Settings -> Limits -> Transition Limits -> Transition Limits
 selectTransitionY { animation } limitsY transition =
     case transition of
@@ -305,7 +343,7 @@ selectTransitionY { animation } limitsY transition =
                 Anim animation.duration doneLimits limitsY
 
 
-selectAll : Settings -> Chart -> Status -> Canvs -> Maybe Canvs
+selectAll : Settings -> Chart -> Status -> Minimap -> Maybe Minimap
 selectAll settings chart status canvas =
     Maybe.map
         (\( limitsX, limitsY ) ->
@@ -318,7 +356,9 @@ selectWithRange : Settings -> Range -> Chart -> Status -> Canvs -> Maybe Canvs
 selectWithRange settings range chart status canvas =
     Maybe.map
         (\( limitsX, limitsY ) ->
-            Can limitsX (selectTransitionY settings (adjustLimitsY limitsY) canvas.limitsY)
+            Can
+                (selectTransitionX settings limitsX canvas.limitsX)
+                (selectTransitionY settings (adjustLimitsY limitsY) canvas.limitsY)
         )
         (selectLimits
             (selectorWithRange
@@ -460,17 +500,42 @@ drawAnimated { animation } viewbox chart status countdown limitsX limitsYStart l
         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
 
-draw : Settings -> Viewbox -> Chart -> Status -> Canvs -> List ( Data.Line String, Visibility )
-draw settings viewbox chart status canvas =
-    case canvas.limitsY of
+drawMinimap : Settings -> Viewbox -> Chart -> Status -> Minimap -> List ( Data.Line String, Visibility )
+drawMinimap settings viewbox chart status minimap =
+    case minimap.limitsY of
         Stat limitsY ->
-            drawStatic viewbox chart status canvas.limitsX limitsY
+            drawStatic viewbox chart status minimap.limitsX limitsY
 
         Del _ limitsYStart _ ->
-            drawStatic viewbox chart status canvas.limitsX limitsYStart
+            drawStatic viewbox chart status minimap.limitsX limitsYStart
 
         Anim countdown limitsYStart limitsYEnd ->
-            drawAnimated settings viewbox chart status countdown canvas.limitsX limitsYStart limitsYEnd
+            drawAnimated settings viewbox chart status countdown minimap.limitsX limitsYStart limitsYEnd
+
+
+drawCanvas : Settings -> Viewbox -> Chart -> Status -> Canvs -> List ( Data.Line String, Visibility )
+drawCanvas settings viewbox chart status canvas =
+    let
+        limitsX =
+            case canvas.limitsX of
+                Stat limits ->
+                    limits
+
+                Del _ _ limitsXEnd ->
+                    limitsXEnd
+
+                Anim _ _ limitsXEnd ->
+                    limitsXEnd
+    in
+    case canvas.limitsY of
+        Stat limitsY ->
+            drawStatic viewbox chart status limitsX limitsY
+
+        Del _ limitsYStart _ ->
+            drawStatic viewbox chart status limitsX limitsYStart
+
+        Anim countdown limitsYStart limitsYEnd ->
+            drawAnimated settings viewbox chart status countdown limitsX limitsYStart limitsYEnd
 
 
 
@@ -716,8 +781,8 @@ drawStaticFractionsXHelp first last middle limitsX =
     fractions
 
 
-drawStaticFractionsX : Limits -> Chart -> List (Fraction Time.Posix)
-drawStaticFractionsX limitsX chart =
+drawStaticFractionsX : Chart -> Limits -> List (Fraction Time.Posix)
+drawStaticFractionsX chart limitsX =
     case Data.getChartTimeline chart of
         [] ->
             []
@@ -731,9 +796,22 @@ drawStaticFractionsX limitsX chart =
                     drawStaticFractionsXHelp first last middle limitsX
 
 
+drawAnimatedFractionsX : Settings -> Chart -> Float -> Limits -> Limits -> List (Fraction Time.Posix)
+drawAnimatedFractionsX settings chart countdown limitsXStart limitsXEnd =
+    []
+
+
 drawFractionsX : Settings -> Chart -> Canvs -> List (Fraction Time.Posix)
 drawFractionsX settings chart canvas =
-    drawStaticFractionsX canvas.limitsX chart
+    case canvas.limitsX of
+        Stat limitsX ->
+            drawStaticFractionsX chart limitsX
+
+        Del _ _ limitsXEnd ->
+            drawStaticFractionsX chart limitsXEnd
+
+        Anim countdown limitsXStart limitsXEnd ->
+            drawAnimatedFractionsX settings chart countdown limitsXStart limitsXEnd
 
 
 
@@ -844,13 +922,25 @@ type Transition a
     | Anim Float a a
 
 
+
+-- @TODO Make better name
+
+
 type alias Can x y =
     { limitsX : x
     , limitsY : y
     }
 
 
+
+-- @TODO Make better name
+
+
 type alias Canvs =
+    Can (Transition Limits) (Transition Limits)
+
+
+type alias Minimap =
     Can Limits (Transition Limits)
 
 
@@ -865,7 +955,7 @@ type alias State =
     , dragging : Dragging
     , range : Range
     , status : Status
-    , minimap : Canvs
+    , minimap : Minimap
     , canvs : Canvs
     }
 
@@ -880,10 +970,13 @@ init settings chart =
         initialStatus =
             Dict.map (\_ _ -> Visible) (Data.getChartLines chart)
 
-        inititalCanvs =
+        initialMinimap =
             Can (Limits 0 0) (Stat (Limits 0 0))
+
+        initialCanvs =
+            Can (Stat (Limits 0 0)) (Stat (Limits 0 0))
     in
-    ( State Nothing NoDragging (Range 0 1) initialStatus inititalCanvs inititalCanvs
+    ( State Nothing NoDragging (Range 0 1) initialStatus initialMinimap initialCanvs
         |> Model settings chart
     , getViewport settings
     )
@@ -1045,7 +1138,7 @@ updateHelp msg settings chart state =
             ( { state
                 | status = nextStatus
                 , minimap = Can state.minimap.limitsX (tickTransition settings delta state.minimap.limitsY)
-                , canvs = Can state.canvs.limitsX (tickTransition settings delta state.canvs.limitsY)
+                , canvs = Can (tickTransition settings delta state.canvs.limitsX) (tickTransition settings delta state.canvs.limitsY)
               }
             , Cmd.none
             )
@@ -1059,7 +1152,7 @@ subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
     Sub.batch
         [ Browser.Events.onResize Resize
-        , if isTransitionRun state.minimap.limitsY || isTransitionRun state.canvs.limitsY then
+        , if isTransitionRun state.canvs.limitsX || isTransitionRun state.canvs.limitsY || isTransitionRun state.minimap.limitsY then
             Browser.Events.onAnimationFrameDelta Tick
 
           else if
@@ -1439,7 +1532,7 @@ viewCanvas settings chart status range canvas =
             , Svg.Attributes.class (element "svg" [])
             ]
             [ viewFractionsY fractionsY
-            , viewLines 2 settings (draw settings config.viewbox chart status canvas)
+            , viewLines 2 settings (drawCanvas settings config.viewbox chart status canvas)
             , viewFractionsTextY fractionsY
             ]
         , viewFractionsX fractionsX
@@ -1447,7 +1540,7 @@ viewCanvas settings chart status range canvas =
         ]
 
 
-viewMinimap : Settings -> Chart -> Status -> Range -> Dragging -> Canvs -> Html Msg
+viewMinimap : Settings -> Chart -> Status -> Range -> Dragging -> Minimap -> Html Msg
 viewMinimap settings chart status range dragging minimap =
     let
         viewbox =
@@ -1460,7 +1553,7 @@ viewMinimap settings chart status range dragging minimap =
             [ Svg.Attributes.viewBox (makeViewBox viewbox)
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewLines 1 settings (draw settings viewbox chart status minimap)
+            [ viewLines 1 settings (drawMinimap settings viewbox chart status minimap)
             ]
         , Html.Lazy.lazy2 viewSelector range dragging
         ]
