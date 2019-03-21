@@ -1,11 +1,12 @@
 module Data exposing
     ( Chart
     , Line
-    , getChartLines
     , decode
     , filterChartLines
     , firstChartX
     , foldlChart
+    , getChartLines
+    , getChartTimeline
     , lastChartX
     , mapChartX
     , mapChartY
@@ -131,6 +132,11 @@ mapChartX fn (Chart timeline lines) =
 mapChartY : (a -> b) -> Chart x a -> Chart x b
 mapChartY fn (Chart timeline lines) =
     Chart timeline (Dict.map (\_ -> mapLineValue (mapCoordinates fn)) lines)
+
+
+getChartTimeline : Chart x y -> List x
+getChartTimeline (Chart timeline _) =
+    coordinatesToList timeline
 
 
 getChartLines : Chart x y -> Dict String (Line (Coordinates y))

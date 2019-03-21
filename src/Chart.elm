@@ -14,6 +14,7 @@ import Regex
 import Svg exposing (Svg, g, path, svg)
 import Svg.Attributes
 import Svg.Keyed
+import Time
 
 
 easeOutQuad : Float -> Float
@@ -275,12 +276,12 @@ selectWithRange { animation } delayed_ range chart status canvas =
         )
     of
         ( Empty, Just ( limitsX, limitsY ) ) ->
-            Static limitsX (adjustLimitsY 5 limitsY)
+            Static limitsX (adjustLimitsY limitsY)
 
         ( Static _ prevLimitsY, Just ( limitsX, limitsY ) ) ->
             let
                 adjustedLimitsY =
-                    adjustLimitsY 5 limitsY
+                    adjustLimitsY limitsY
             in
             if prevLimitsY == adjustedLimitsY then
                 Static limitsX adjustedLimitsY
@@ -294,7 +295,7 @@ selectWithRange { animation } delayed_ range chart status canvas =
         ( Delayed countdown _ limitsYStart limitsYEnd, Just ( limitsX, limitsY ) ) ->
             let
                 adjustedLimitsY =
-                    adjustLimitsY 5 limitsY
+                    adjustLimitsY limitsY
             in
             if not delayed then
                 Animated animation.duration limitsX limitsYStart adjustedLimitsY
@@ -308,7 +309,7 @@ selectWithRange { animation } delayed_ range chart status canvas =
         ( Animated countdown _ limitsYStart limitsYEnd, Just ( limitsX, limitsY ) ) ->
             let
                 adjustedLimitsY =
-                    adjustLimitsY 5 limitsY
+                    adjustLimitsY limitsY
             in
             if limitsYEnd == adjustedLimitsY then
                 Animated countdown limitsX limitsYStart limitsYEnd
@@ -474,12 +475,21 @@ draw settings viewBox chart status canvas =
             drawAnimated settings viewBox chart status countdown limitsX limitsYStart limitsYEnd
 
 
+
+-- @TODO move color directly to view
+
+
 type alias Fraction value =
     { color : String
     , opacity : Float
     , value : value
     , position : Float
     }
+
+
+fractionX : Float -> Int -> Float -> Fraction Time.Posix
+fractionX opacity timestamp position =
+    Fraction "" opacity (Time.millisToPosix timestamp) position
 
 
 fractionY : Float -> Int -> Float -> Fraction Int
@@ -519,23 +529,23 @@ adjustBiSignLimitsY fractionsCount limitsY =
             (pointsPerFractionAboveZero * toFloat to)
 
 
-adjustLimitsY : Int -> Limits -> Limits
-adjustLimitsY fractionsCount limitsY =
+adjustLimitsY : Limits -> Limits
+adjustLimitsY limitsY =
     if limitsY.min < 0 && limitsY.max > 0 then
-        adjustBiSignLimitsY fractionsCount limitsY
+        adjustBiSignLimitsY config.fractionsCountY limitsY
 
     else
         limitsY
 
 
-drawStaticFractionsY : ViewBox -> Int -> Limits -> List (Fraction Int)
-drawStaticFractionsY viewBox fractionsCount limitsY =
+drawStaticFractionsY : Limits -> List (Fraction Int)
+drawStaticFractionsY limitsY =
     let
         pointsPerFraction =
-            calcPointsPerFraction fractionsCount limitsY
+            calcPointsPerFraction config.fractionsCountY limitsY
 
         scaleY =
-            pointsPerFraction * calcScale viewBox.height limitsY
+            pointsPerFraction * calcScale config.viewBox.height limitsY
 
         shiftY =
             limitsY.max / pointsPerFraction
@@ -546,15 +556,15 @@ drawStaticFractionsY viewBox fractionsCount limitsY =
                 (round ((shiftY - toFloat index) * pointsPerFraction))
                 (toFloat index * scaleY)
         )
-        (List.range 0 fractionsCount)
+        (List.range 0 config.fractionsCountY)
 
 
 
 -- @TODO Fixup wrong top dirreciton
 
 
-drawAnimatedFractionsY : Settings -> ViewBox -> Int -> Float -> Limits -> Limits -> List (Fraction Int)
-drawAnimatedFractionsY { animation } viewBox fractionsCount countdown limitsYStart limitsYEnd =
+drawAnimatedFractionsY : Settings -> Float -> Limits -> Limits -> List (Fraction Int)
+drawAnimatedFractionsY { animation } countdown limitsYStart limitsYEnd =
     let
         doneEnd =
             easeOutQuad (1 - countdown / animation.duration)
@@ -563,10 +573,10 @@ drawAnimatedFractionsY { animation } viewBox fractionsCount countdown limitsYSta
             1 - doneEnd
 
         pointsPerFractionStart =
-            calcPointsPerFraction fractionsCount limitsYStart
+            calcPointsPerFraction config.fractionsCountY limitsYStart
 
         overlapYStart =
-            calcLimitsOverlap viewBox doneStart limitsYEnd limitsYStart
+            calcLimitsOverlap config.viewBox doneStart limitsYEnd limitsYStart
 
         scaleYStart =
             pointsPerFractionStart * overlapYStart.scale
@@ -575,10 +585,10 @@ drawAnimatedFractionsY { animation } viewBox fractionsCount countdown limitsYSta
             limitsYStart.max / pointsPerFractionStart
 
         pointsPerFractionEnd =
-            calcPointsPerFraction fractionsCount limitsYEnd
+            calcPointsPerFraction config.fractionsCountY limitsYEnd
 
         overlapYEnd =
-            calcLimitsOverlap viewBox doneEnd limitsYStart limitsYEnd
+            calcLimitsOverlap config.viewBox doneEnd limitsYStart limitsYEnd
 
         scaleYEnd =
             pointsPerFractionEnd * overlapYEnd.scale
@@ -604,24 +614,74 @@ drawAnimatedFractionsY { animation } viewBox fractionsCount countdown limitsYSta
                 , fractionY doneEnd endValue (toFloat index * scaleYEnd)
                 ]
         )
-        (List.range 0 fractionsCount)
+        (List.range 0 config.fractionsCountY)
         |> List.concat
 
 
-drawFractionsY : Settings -> ViewBox -> Canvas -> List (Fraction Int)
-drawFractionsY settings viewBox canvas =
+drawFractionsY : Settings -> Canvas -> List (Fraction Int)
+drawFractionsY settings canvas =
     case canvas of
         Empty ->
             []
 
         Static _ limitsY ->
-            drawStaticFractionsY viewBox 5 limitsY
+            drawStaticFractionsY limitsY
 
         Delayed _ _ limitsYStart _ ->
-            drawStaticFractionsY viewBox 5 limitsYStart
+            drawStaticFractionsY limitsYStart
 
         Animated countdown _ limitsYStart limitsYEnd ->
-            drawAnimatedFractionsY settings viewBox 5 countdown limitsYStart limitsYEnd
+            drawAnimatedFractionsY settings countdown limitsYStart limitsYEnd
+
+
+drawStaticFractionsX : Limits -> Chart -> List (Fraction Time.Posix)
+drawStaticFractionsX limitsX chart =
+    let
+        pointsPerFraction =
+            calcPointsPerFraction (config.fractionsCountX - 1) limitsX
+
+        scaleX =
+            pointsPerFraction * calcScale config.viewBox.width limitsX
+
+        shiftX =
+            toFloat config.viewBox.width / toFloat (config.fractionsCountX * config.fractionsCountX)
+    in
+    List.foldr
+        (\timestamp ( fractionIndex, acc ) ->
+            if
+                (fractionIndex >= 0)
+                    && (toFloat (fractionIndex - 1) * pointsPerFraction <= timestamp - limitsX.min)
+                    && (timestamp - limitsX.min <= toFloat fractionIndex * pointsPerFraction)
+            then
+                ( fractionIndex - 1
+                , fractionX 1
+                    (round timestamp)
+                    (toFloat fractionIndex * scaleX - toFloat fractionIndex * shiftX)
+                    :: acc
+                )
+
+            else
+                ( fractionIndex, acc )
+        )
+        ( config.fractionsCountX - 1, [] )
+        (Data.getChartTimeline chart)
+        |> Tuple.second
+
+
+drawFractionsX : Settings -> Chart -> Canvas -> List (Fraction Time.Posix)
+drawFractionsX settings chart canvas =
+    case canvas of
+        Empty ->
+            []
+
+        Static limitsX _ ->
+            drawStaticFractionsX limitsX chart
+
+        Delayed _ limitsX _ _ ->
+            drawStaticFractionsX limitsX chart
+
+        Animated _ limitsX _ _ ->
+            drawStaticFractionsX limitsX chart
 
 
 
@@ -1020,12 +1080,14 @@ makeViewBox { width, height } =
 
 type alias Config =
     { viewBox : ViewBox
+    , fractionsCountX : Int
+    , fractionsCountY : Int
     }
 
 
 config : Config
 config =
-    Config (ViewBox 460 460)
+    Config (ViewBox 460 460) 6 5
 
 
 containsClass : String -> String -> Bool
@@ -1087,6 +1149,11 @@ withTouchXandSelectorWidth tagger =
             |> DOM.target
         )
         |> Decode.at [ "changedTouches", "0" ]
+
+
+px : Float -> String
+px value =
+    String.fromFloat value ++ "px"
 
 
 pct : Float -> String
@@ -1177,14 +1244,81 @@ viewLines strokeWidth { animation } paths =
         )
 
 
-viewBreakpointsY : List (Fraction Int) -> Svg msg
-viewBreakpointsY fractions =
+monthToDateString : Time.Month -> String
+monthToDateString month =
+    case month of
+        Time.Jan ->
+            "Jan"
+
+        Time.Feb ->
+            "Feb"
+
+        Time.Mar ->
+            "Mar"
+
+        Time.Apr ->
+            "Apr"
+
+        Time.May ->
+            "May"
+
+        Time.Jun ->
+            "Jun"
+
+        Time.Jul ->
+            "Jul"
+
+        Time.Aug ->
+            "Aug"
+
+        Time.Sep ->
+            "Sep"
+
+        Time.Oct ->
+            "Oct"
+
+        Time.Nov ->
+            "Nov"
+
+        Time.Dec ->
+            "Dec"
+
+
+posixToDateString : Time.Zone -> Time.Posix -> String
+posixToDateString zone posix =
+    monthToDateString (Time.toMonth zone posix) ++ " " ++ String.fromInt (Time.toDay zone posix)
+
+
+viewFractionsX : List (Fraction Time.Posix) -> Svg msg
+viewFractionsX fractions =
+    g
+        []
+        (List.map
+            (\fraction ->
+                Svg.text_
+                    [ Svg.Attributes.transform ("translate(" ++ coordinate fraction.position (toFloat config.viewBox.height) ++ ")")
+                    , Svg.Attributes.y "-8"
+                    , Svg.Attributes.fontSize "14"
+                    , Svg.Attributes.fontWeight "300"
+                    , Svg.Attributes.fontFamily "sans-serif"
+                    , Svg.Attributes.fill "#afb9c1"
+                    , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
+                    ]
+                    [ Svg.text (posixToDateString Time.utc fraction.value)
+                    ]
+            )
+            fractions
+        )
+
+
+viewFractionsY : List (Fraction Int) -> Svg msg
+viewFractionsY fractions =
     g
         []
         (List.map
             (\fraction ->
                 path
-                    [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat fraction.position ++ ")")
+                    [ Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
                     , Svg.Attributes.stroke fraction.color
                     , Svg.Attributes.strokeWidth "1"
                     , Svg.Attributes.fill "none"
@@ -1197,14 +1331,14 @@ viewBreakpointsY fractions =
         )
 
 
-viewBreakpointsTextY : List (Fraction Int) -> Svg msg
-viewBreakpointsTextY fractions =
+viewFractionsTextY : List (Fraction Int) -> Svg msg
+viewFractionsTextY fractions =
     g
         []
         (List.map
             (\fraction ->
                 Svg.text_
-                    [ Svg.Attributes.transform ("translate(0," ++ String.fromFloat fraction.position ++ ")")
+                    [ Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
                     , Svg.Attributes.y "-8"
                     , Svg.Attributes.fontSize "14"
                     , Svg.Attributes.fontWeight "300"
@@ -1237,8 +1371,11 @@ viewScroller settings range =
 viewCanvas : Settings -> Chart -> Status -> Range -> Canvas -> Html Msg
 viewCanvas settings chart status range canvas =
     let
-        foos =
-            drawFractionsY settings config.viewBox canvas
+        fractionsX =
+            drawFractionsX settings chart canvas
+
+        fractionsY =
+            drawFractionsY settings canvas
     in
     div
         [ Html.Attributes.class (element "canvas" [])
@@ -1247,9 +1384,10 @@ viewCanvas settings chart status range canvas =
             [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewBreakpointsY foos
+            [ viewFractionsY fractionsY
             , viewLines 2 settings (draw settings config.viewBox chart status canvas)
-            , viewBreakpointsTextY foos
+            , viewFractionsTextY fractionsY
+            , viewFractionsX fractionsX
             ]
         , viewScroller settings range
         ]
