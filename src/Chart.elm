@@ -21,15 +21,6 @@ easeOutQuad delta =
     delta * (2 - delta)
 
 
-sign : number -> number
-sign x =
-    if x >= 0 then
-        1
-
-    else
-        -1
-
-
 calcScale : Int -> Limits -> Float
 calcScale side { min, max } =
     if min == max then
@@ -71,13 +62,6 @@ calcLimitsOverlap viewBox done limitsStart limitsEnd =
 calcPointsPerFraction : Int -> Limits -> Float
 calcPointsPerFraction fractionsCount limits =
     (limits.max - limits.min) / toFloat fractionsCount
-
-
-generateFractionsRange : Float -> Limits -> List Int
-generateFractionsRange pointsPerFraction limits =
-    List.range
-        (floor (limits.min / pointsPerFraction))
-        (floor (limits.max / pointsPerFraction))
 
 
 mergePathsToLines : Dict String (Data.Line a) -> Dict String String -> List (Data.Line String)
@@ -247,7 +231,7 @@ select { animation } mRange chart status canvas =
                     )
                 |> Data.foldlChart selectStep
                     { timeline = Nothing
-                    , values = Just (Limits 0 0)
+                    , values = Nothing
                     , approximation = NoApproximate
                     }
     in
@@ -257,7 +241,7 @@ select { animation } mRange chart status canvas =
                 Static limitsX limitsY
 
             else
-                Static limitsX (baz config.viewBox 5 limitsY)
+                Static limitsX (adjustLimitsY 5 limitsY)
 
         ( Static _ prevLimitsY, Just limitsX, Just limitsY ) ->
             if mRange == Nothing then
@@ -270,7 +254,7 @@ select { animation } mRange chart status canvas =
             else
                 let
                     asd =
-                        baz config.viewBox 5 limitsY
+                        adjustLimitsY 5 limitsY
                 in
                 if prevLimitsY == asd then
                     Static limitsX asd
@@ -299,7 +283,7 @@ select { animation } mRange chart status canvas =
             else
                 let
                     asd =
-                        baz config.viewBox 5 limitsY
+                        adjustLimitsY 5 limitsY
                 in
                 if limitsYEnd == asd then
                     Animated delay countdown limitsX limitsYStart limitsYEnd
@@ -469,56 +453,41 @@ fractionY opacity value position =
         Fraction "#f2f4f5" opacity value position
 
 
-jj : Int -> Limits -> ( Float, Int, Int )
-jj st lim =
+adjustBiSignLimitsY : Int -> Limits -> Limits
+adjustBiSignLimitsY fractionsCount limitsY =
     let
-        absMin =
-            abs lim.min
-
-        absMax =
-            abs lim.max
-
-        kMin =
-            clamp 1 (st - 1) (floor (toFloat st / (absMax / absMin + 1)))
-
-        kMax =
-            clamp 1 (st - 1) (floor (toFloat st / (absMin / absMax + 1)))
-
-        qMin =
-            absMin / toFloat kMin
-
-        qMax =
-            absMax / toFloat kMax
-    in
-    if qMin > qMax then
-        ( qMax, st - kMax, kMax )
-
-    else
-        ( qMin, kMin, st - kMin )
-
-
-baz : ViewBox -> Int -> Limits -> Limits
-baz viewBox steps limits =
-    let
-        ( s, l, k ) =
-            if limits.min == 0 then
-                ( abs limits.max / toFloat steps, 0, steps )
-
-            else if limits.max == 0 then
-                ( abs limits.min / toFloat steps, steps, 0 )
-
-            else
-                jj steps limits
-
         from =
-            sign (round limits.min) * l
+            truncate (toFloat fractionsCount / (limitsY.max / limitsY.min + 1))
+                |> clamp (1 - fractionsCount) -1
 
         to =
-            sign (round limits.max) * k
+            truncate (toFloat fractionsCount / (1 - limitsY.min / limitsY.max))
+                |> clamp 1 (fractionsCount - 1)
+
+        pointsPerFractionBelowZero =
+            max (limitsY.min / toFloat from) (limitsY.max / toFloat (fractionsCount + from))
+
+        pointsPerFractionAboveZero =
+            max (limitsY.min / toFloat (to - fractionsCount)) (limitsY.max / toFloat to)
     in
-    Limits
-        (s * toFloat from)
-        (s * toFloat to)
+    if pointsPerFractionBelowZero < pointsPerFractionAboveZero then
+        Limits
+            (pointsPerFractionBelowZero * toFloat from)
+            (pointsPerFractionBelowZero * toFloat (fractionsCount + from))
+
+    else
+        Limits
+            (pointsPerFractionAboveZero * toFloat (to - fractionsCount))
+            (pointsPerFractionAboveZero * toFloat to)
+
+
+adjustLimitsY : Int -> Limits -> Limits
+adjustLimitsY fractionsCount limitsY =
+    if limitsY.min < 0 && limitsY.max > 0 then
+        adjustBiSignLimitsY fractionsCount limitsY
+
+    else
+        limitsY
 
 
 drawStaticFractionsY : ViewBox -> Int -> Limits -> List (Fraction Int)
@@ -528,19 +497,22 @@ drawStaticFractionsY viewBox fractionsCount limitsY =
             calcPointsPerFraction fractionsCount limitsY
 
         scaleY =
-            calcScale viewBox.height limitsY
+            pointsPerFraction * calcScale viewBox.height limitsY
+
+        shiftY =
+            limitsY.max / pointsPerFraction
     in
     List.map
         (\index ->
-            let
-                shift =
-                    toFloat index * pointsPerFraction
-            in
             fractionY 1
-                (index * round pointsPerFraction)
-                ((limitsY.max - shift) * scaleY)
+                (round ((shiftY - toFloat index) * pointsPerFraction))
+                (toFloat index * scaleY)
         )
-        (generateFractionsRange pointsPerFraction limitsY)
+        (List.range 0 fractionsCount)
+
+
+
+-- @TODO Fixup wrong top dirreciton
 
 
 drawAnimatedFractionsY : Settings -> ViewBox -> Int -> Float -> Limits -> Limits -> List (Fraction Int)
@@ -558,46 +530,44 @@ drawAnimatedFractionsY { animation } viewBox fractionsCount countdown limitsYSta
         overlapYStart =
             calcLimitsOverlap viewBox doneStart limitsYEnd limitsYStart
 
+        scaleYStart =
+            pointsPerFractionStart * overlapYStart.scale
+
+        shiftYStart =
+            limitsYStart.max / pointsPerFractionStart
+
         pointsPerFractionEnd =
             calcPointsPerFraction fractionsCount limitsYEnd
 
         overlapYEnd =
             calcLimitsOverlap viewBox doneEnd limitsYStart limitsYEnd
+
+        scaleYEnd =
+            pointsPerFractionEnd * overlapYEnd.scale
+
+        shiftYEnd =
+            limitsYEnd.max / pointsPerFractionEnd
     in
-    List.map2
-        (\indexStart indexEnd ->
+    List.map
+        (\index ->
             let
                 startValue =
-                    indexStart * round pointsPerFractionStart
-
-                startShift =
-                    toFloat indexStart * pointsPerFractionStart
+                    round ((shiftYStart - toFloat index) * pointsPerFractionStart)
 
                 endValue =
-                    indexEnd * round pointsPerFractionEnd
-
-                endShift =
-                    toFloat indexEnd * pointsPerFractionEnd
+                    round ((shiftYEnd - toFloat index) * pointsPerFractionEnd)
             in
             if startValue == endValue then
-                [ fractionY 1
-                    startValue
-                    ((overlapYStart.max - startShift) * overlapYStart.scale)
+                [ fractionY 1 startValue (toFloat index * calcDoneLimit scaleYStart scaleYEnd doneEnd)
                 ]
 
             else
-                [ fractionY doneStart
-                    startValue
-                    ((overlapYStart.max - startShift) * overlapYStart.scale)
-                , fractionY doneEnd
-                    endValue
-                    ((overlapYEnd.max - endShift) * overlapYEnd.scale)
+                [ fractionY doneStart startValue (toFloat index * scaleYStart)
+                , fractionY doneEnd endValue (toFloat index * scaleYEnd)
                 ]
         )
-        (generateFractionsRange pointsPerFractionStart limitsYStart)
-        (generateFractionsRange pointsPerFractionEnd limitsYEnd)
+        (List.range 0 fractionsCount)
         |> List.concat
-        |> List.filter ((/=) 0 << .opacity)
 
 
 drawFractionsY : Settings -> ViewBox -> Canvas -> List (Fraction Int)
