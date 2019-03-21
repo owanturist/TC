@@ -24,6 +24,15 @@ easeOutQuad delta =
     delta * (2 - delta)
 
 
+roundFor : Int -> Float -> Float
+roundFor afterPoint value =
+    let
+        divider =
+            toFloat (10 ^ max 0 afterPoint)
+    in
+    toFloat (round (value * divider)) / divider
+
+
 calcScale : Int -> Limits -> Float
 calcScale side { min, max } =
     if min == max then
@@ -221,6 +230,8 @@ selectLimits selector chart status =
                     )
                 |> Data.foldlChart selector
                     { timeline = Nothing
+
+                    -- @TODO Set Limits 0 0
                     , values = Nothing
                     , approximation = NoApproximate
                     }
@@ -634,38 +645,69 @@ drawFractionsY settings canvas =
             drawAnimatedFractionsY settings countdown limitsYStart limitsYEnd
 
 
+remBy : Float -> Float -> Float
+remBy base x =
+    x - base * toFloat (truncate (x / base))
+
+
 drawStaticFractionsX : Limits -> Chart -> List (Fraction Time.Posix)
 drawStaticFractionsX limitsX chart =
     let
         pointsPerFraction =
-            calcPointsPerFraction (config.fractionsCountX - 1) limitsX
+            calcPointsPerFraction config.fractionsCountX limitsX
 
-        scaleX =
-            pointsPerFraction * calcScale config.viewbox.width limitsX
-
-        shiftX =
-            toFloat config.viewbox.width / toFloat (config.fractionsCountX * config.fractionsCountX)
+        deltaX =
+            limitsX.max - limitsX.min
     in
-    List.foldr
-        (\timestamp ( fractionIndex, acc ) ->
-            if
-                (fractionIndex >= 0)
-                    && (toFloat (fractionIndex - 1) * pointsPerFraction <= timestamp - limitsX.min)
-                    && (timestamp - limitsX.min <= toFloat fractionIndex * pointsPerFraction)
-            then
-                ( fractionIndex - 1
-                , fractionX 1
-                    (round timestamp)
-                    (toFloat fractionIndex * scaleX - toFloat fractionIndex * shiftX)
-                    :: acc
-                )
+    case Data.getChartTimeline chart of
+        [] ->
+            []
 
-            else
-                ( fractionIndex, acc )
-        )
-        ( config.fractionsCountX - 1, [] )
-        (Data.getChartTimeline chart)
-        |> Tuple.second
+        first :: rest ->
+            case List.reverse rest of
+                [] ->
+                    []
+
+                last :: middle ->
+                    let
+                        ( _, { fractions } ) =
+                            List.foldr
+                                (\timestamp ( index, acc ) ->
+                                    ( index + 1
+                                    , case acc.each of
+                                        Nothing ->
+                                            if (first + pointsPerFraction) <= timestamp then
+                                                { each = Just index
+                                                , fractions = timestamp :: acc.fractions
+                                                }
+
+                                            else
+                                                acc
+
+                                        Just each ->
+                                            if remainderBy each index == 0 then
+                                                { acc | fractions = timestamp :: acc.fractions }
+
+                                            else
+                                                acc
+                                    )
+                                )
+                                ( 1
+                                , { each = Nothing
+                                  , fractions = [ first, last ]
+                                  }
+                                )
+                                middle
+                    in
+                    List.filterMap
+                        (\timestamp ->
+                            if limitsX.min <= timestamp && timestamp <= limitsX.max then
+                                Just (fractionX 1 (round timestamp) ((timestamp - limitsX.min) / deltaX))
+
+                            else
+                                Nothing
+                        )
+                        fractions
 
 
 drawFractionsX : Settings -> Chart -> Canvas -> List (Fraction Time.Posix)
@@ -1127,7 +1169,7 @@ type alias Config =
 
 config : Config
 config =
-    Config (Viewbox 460 460) 6 5
+    Config (Viewbox 460 460) 5 5
 
 
 containsClass : String -> String -> Bool
@@ -1198,7 +1240,7 @@ px value =
 
 pct : Float -> String
 pct value =
-    String.fromFloat value ++ "%"
+    String.fromFloat (100 * (roundFor 4 value)) ++ "%"
 
 
 viewContainer : List (Html msg) -> Html msg
@@ -1225,12 +1267,12 @@ viewSelector range dragging =
         )
         [ div
             [ Html.Attributes.class (element "selector-field" [ flag "left" True ])
-            , Html.Attributes.style "width" (pct (100 * range.from))
+            , Html.Attributes.style "width" (pct range.from)
             ]
             []
         , div
             [ Html.Attributes.class (element "selector-field" [ flag "middle" True ])
-            , Html.Attributes.style "width" (pct (100 * (range.to - range.from)))
+            , Html.Attributes.style "width" (pct (range.to - range.from))
             , Html.Events.on "touchstart" (withTouchXandSelectorWidth StartSelectorAreaChanging)
             ]
             [ div
@@ -1329,22 +1371,23 @@ posixToDateString zone posix =
     monthToDateString (Time.toMonth zone posix) ++ " " ++ String.fromInt (Time.toDay zone posix)
 
 
-viewFractionsX : List (Fraction Time.Posix) -> Svg msg
-viewFractionsX fractions =
-    g
+viewFractionsX : Viewport -> List (Fraction Time.Posix) -> Html msg
+viewFractionsX viewport fractions =
+    let
+        fractionWidth =
+            1 / toFloat (List.length fractions)
+    in
+    div
         []
         (List.map
             (\fraction ->
-                Svg.text_
-                    [ Svg.Attributes.transform ("translate(" ++ coordinate fraction.position (toFloat config.viewbox.height) ++ ")")
-                    , Svg.Attributes.y "-8"
-                    , Svg.Attributes.fontSize "14"
-                    , Svg.Attributes.fontWeight "300"
-                    , Svg.Attributes.fontFamily "sans-serif"
-                    , Svg.Attributes.fill "#afb9c1"
-                    , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
+                span
+                    [ Html.Attributes.class (element "fraction-x" [])
+                    , Html.Attributes.style "left" (pct ( fraction.position))
+                    , Html.Attributes.style "width" (pct fractionWidth)
+                    , Html.Attributes.style "opacity" (String.fromFloat fraction.opacity)
                     ]
-                    [ Svg.text (posixToDateString Time.utc fraction.value)
+                    [ text (posixToDateString Time.utc fraction.value)
                     ]
             )
             fractions
@@ -1402,14 +1445,14 @@ viewScroller settings range =
         ]
         [ div
             [ Html.Attributes.class (element "scroller-content" [])
-            , Html.Attributes.style "width" (pct (100 / (range.to - range.from)))
+            , Html.Attributes.style "width" (pct (1 / (range.to - range.from)))
             ]
             []
         ]
 
 
-viewCanvas : Settings -> Chart -> Status -> Range -> Canvas -> Html Msg
-viewCanvas settings chart status range canvas =
+viewCanvas : Settings -> Viewport -> Chart -> Status -> Range -> Canvas -> Html Msg
+viewCanvas settings viewport chart status range canvas =
     let
         fractionsX =
             drawFractionsX settings chart canvas
@@ -1427,8 +1470,8 @@ viewCanvas settings chart status range canvas =
             [ viewFractionsY fractionsY
             , viewLines 2 settings (draw settings config.viewbox chart status canvas)
             , viewFractionsTextY fractionsY
-            , viewFractionsX fractionsX
             ]
+        , viewFractionsX viewport fractionsX
         , viewScroller settings range
         ]
 
@@ -1536,11 +1579,17 @@ view (Model settings chart state) =
         [ Html.Attributes.id (nodeID settings.id "root")
         , Html.Attributes.class block
         ]
-        [ viewCanvas settings chart state.status state.range state.canvas
-        , viewContainer
-            [ viewMinimap settings chart state.status state.range state.dragging state.minimap
-            ]
-        , viewContainer
-            [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
-            ]
-        ]
+        (case state.viewport of
+            Nothing ->
+                []
+
+            Just viewport ->
+                [ viewCanvas settings viewport chart state.status state.range state.canvas
+                , viewContainer
+                    [ viewMinimap settings chart state.status state.range state.dragging state.minimap
+                    ]
+                , viewContainer
+                    [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
+                    ]
+                ]
+        )
