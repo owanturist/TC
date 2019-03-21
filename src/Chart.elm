@@ -124,16 +124,16 @@ mergeLimitY bunch acc =
                 |> Just
 
 
-selectAll : Float -> List ( String, Float ) -> Selection -> Selection
-selectAll x bunch acc =
+selectorAll : Float -> List ( String, Float ) -> Selection -> Selection
+selectorAll x bunch acc =
     { timeline = mergeLimitX x acc.timeline
     , values = mergeLimitY bunch acc.values
     , approximation = acc.approximation
     }
 
 
-selectWithRange : Range -> Float -> Float -> Float -> List ( String, Float ) -> Selection -> Selection
-selectWithRange { from, to } firstX lastX x bunch acc =
+selectorWithRange : Range -> Float -> Float -> Float -> List ( String, Float ) -> Selection -> Selection
+selectorWithRange { from, to } firstX lastX x bunch acc =
     let
         position =
             (x - firstX) / (lastX - firstX)
@@ -207,20 +207,9 @@ selectWithRange { from, to } firstX lastX x bunch acc =
         { acc | approximation = ToLeft ( position, x, List.map Tuple.second bunch ) }
 
 
-select : Settings -> Maybe Range -> Chart -> Status -> Canvas -> Canvas
-select { animation } mRange chart status canvas =
+selectLimits : (Float -> List ( String, Float ) -> Selection -> Selection) -> Chart -> Status -> Maybe ( Limits, Limits )
+selectLimits selector chart status =
     let
-        selectStep =
-            case mRange of
-                Nothing ->
-                    selectAll
-
-                Just range ->
-                    selectWithRange
-                        range
-                        (Data.firstChartX chart)
-                        (Data.lastChartX chart)
-
         { timeline, values } =
             chart
                 |> Data.filterChartLines
@@ -229,76 +218,101 @@ select { animation } mRange chart status canvas =
                             |> Maybe.map isSelected
                             |> Maybe.withDefault False
                     )
-                |> Data.foldlChart selectStep
+                |> Data.foldlChart selector
                     { timeline = Nothing
                     , values = Nothing
                     , approximation = NoApproximate
                     }
     in
-    case ( canvas, timeline, values ) of
-        ( Empty, Just limitsX, Just limitsY ) ->
-            if mRange == Nothing then
+    Maybe.map2 Tuple.pair timeline values
+
+
+selectAll : Settings -> Chart -> Status -> Canvas -> Canvas
+selectAll { animation } chart status canvas =
+    case ( canvas, selectLimits selectorAll chart status ) of
+        ( Empty, Just ( limitsX, limitsY ) ) ->
+            Static limitsX limitsY
+
+        ( Static _ prevLimitsY, Just ( limitsX, limitsY ) ) ->
+            if prevLimitsY == limitsY then
                 Static limitsX limitsY
 
             else
-                Static limitsX (adjustLimitsY 5 limitsY)
+                Animated animation.duration limitsX prevLimitsY limitsY
 
-        ( Static _ prevLimitsY, Just limitsX, Just limitsY ) ->
-            if mRange == Nothing then
-                if prevLimitsY == limitsY then
-                    Static limitsX limitsY
-
-                else
-                    Animated animation.delay animation.duration limitsX prevLimitsY limitsY
+        ( Animated countdown _ limitsYStart limitsYEnd, Just ( limitsX, limitsY ) ) ->
+            if limitsYEnd == limitsY then
+                Animated countdown limitsX limitsYStart limitsYEnd
 
             else
                 let
-                    asd =
-                        adjustLimitsY 5 limitsY
+                    done =
+                        easeOutQuad (1 - countdown / animation.duration)
                 in
-                if prevLimitsY == asd then
-                    Static limitsX asd
+                Animated animation.duration
+                    limitsX
+                    { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
+                    , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
+                    }
+                    limitsY
 
-                else
-                    Animated animation.delay animation.duration limitsX prevLimitsY asd
+        _ ->
+            Empty
 
-        ( Animated delay countdown _ limitsYStart limitsYEnd, Just limitsX, Just limitsY ) ->
-            if mRange == Nothing then
-                if limitsYEnd == limitsY then
-                    Animated delay countdown limitsX limitsYStart limitsYEnd
 
-                else
-                    let
-                        done =
-                            easeOutQuad (1 - countdown / animation.duration)
-                    in
-                    Animated delay
-                        animation.duration
-                        limitsX
-                        { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
-                        , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
-                        }
-                        limitsY
+selectWithRange : Settings -> Bool -> Range -> Chart -> Status -> Canvas -> Canvas
+selectWithRange { animation } delayed range chart status canvas =
+    case ( canvas, selectLimits (selectorWithRange range (Data.firstChartX chart) (Data.lastChartX chart)) chart status ) of
+        ( Empty, Just ( limitsX, limitsY ) ) ->
+            Static limitsX (adjustLimitsY 5 limitsY)
+
+        ( Static _ prevLimitsY, Just ( limitsX, limitsY ) ) ->
+            let
+                adjustedLimitsY =
+                    adjustLimitsY 5 limitsY
+            in
+            if prevLimitsY == adjustedLimitsY then
+                Static limitsX adjustedLimitsY
+
+            else if delayed then
+                Delayed animation.delay limitsX prevLimitsY adjustedLimitsY
+
+            else
+                Animated animation.duration limitsX prevLimitsY adjustedLimitsY
+
+        ( Delayed countdown _ limitsYStart limitsYEnd, Just ( limitsX, limitsY ) ) ->
+            let
+                adjustedLimitsY =
+                    adjustLimitsY 5 limitsY
+            in
+            if not delayed then
+                Animated animation.duration limitsX limitsYStart adjustedLimitsY
+
+            else if limitsYEnd == adjustedLimitsY then
+                Delayed countdown limitsX limitsYStart limitsYEnd
+
+            else
+                Delayed animation.delay limitsX limitsYStart adjustedLimitsY
+
+        ( Animated countdown _ limitsYStart limitsYEnd, Just ( limitsX, limitsY ) ) ->
+            let
+                adjustedLimitsY =
+                    adjustLimitsY 5 limitsY
+            in
+            if limitsYEnd == adjustedLimitsY then
+                Animated countdown limitsX limitsYStart limitsYEnd
 
             else
                 let
-                    asd =
-                        adjustLimitsY 5 limitsY
+                    done =
+                        easeOutQuad (1 - countdown / animation.duration)
                 in
-                if limitsYEnd == asd then
-                    Animated delay countdown limitsX limitsYStart limitsYEnd
-
-                else
-                    let
-                        done =
-                            easeOutQuad (1 - countdown / animation.duration)
-
-                        limitsYDone =
-                            { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
-                            , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
-                            }
-                    in
-                    Animated animation.delay animation.duration limitsX limitsYDone asd
+                Animated animation.duration
+                    limitsX
+                    { min = calcDoneLimit limitsYStart.min limitsYEnd.min done
+                    , max = calcDoneLimit limitsYStart.max limitsYEnd.max done
+                    }
+                    adjustedLimitsY
 
         _ ->
             Empty
@@ -395,45 +409,58 @@ drawHelp mapX mapY limitsX chart =
         |> mergePathsToLines (Data.getChartLines chart)
 
 
+drawStatic : ViewBox -> Chart -> Status -> Limits -> Limits -> List ( Data.Line String, Visibility )
+drawStatic viewBox chart status limitsX limitsY =
+    let
+        scaleX =
+            calcScale viewBox.width limitsX
+
+        scaleY =
+            calcScale viewBox.height limitsY
+    in
+    chart
+        |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
+        |> drawHelp
+            (\x -> scaleX * (x - limitsX.min))
+            (\y -> scaleY * (limitsY.max - y))
+            limitsX
+        |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
+
+
+drawAnimated : Settings -> ViewBox -> Chart -> Status -> Float -> Limits -> Limits -> Limits -> List ( Data.Line String, Visibility )
+drawAnimated { animation } viewBox chart status countdown limitsX limitsYStart limitsYEnd =
+    let
+        scaleX =
+            calcScale viewBox.width limitsX
+
+        done =
+            easeOutQuad (1 - countdown / animation.duration)
+
+        overlapY =
+            calcLimitsOverlap viewBox done limitsYStart limitsYEnd
+    in
+    drawHelp
+        (\x -> scaleX * (x - limitsX.min))
+        (\y -> overlapY.scale * (overlapY.max - y))
+        limitsX
+        chart
+        |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
+
+
 draw : Settings -> ViewBox -> Chart -> Status -> Canvas -> List ( Data.Line String, Visibility )
-draw { animation } viewBox chart status canvas =
+draw settings viewBox chart status canvas =
     case canvas of
         Empty ->
             []
 
         Static limitsX limitsY ->
-            let
-                scaleX =
-                    calcScale viewBox.width limitsX
+            drawStatic viewBox chart status limitsX limitsY
 
-                scaleY =
-                    calcScale viewBox.height limitsY
-            in
-            chart
-                |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
-                |> drawHelp
-                    (\x -> scaleX * (x - limitsX.min))
-                    (\y -> scaleY * (limitsY.max - y))
-                    limitsX
-                |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
+        Delayed _ limitsX limitsYStart _ ->
+            drawStatic viewBox chart status limitsX limitsYStart
 
-        Animated _ countdown limitsX limitsYStart limitsYEnd ->
-            let
-                scaleX =
-                    calcScale viewBox.width limitsX
-
-                done =
-                    easeOutQuad (1 - countdown / animation.duration)
-
-                overlapY =
-                    calcLimitsOverlap viewBox done limitsYStart limitsYEnd
-            in
-            drawHelp
-                (\x -> scaleX * (x - limitsX.min))
-                (\y -> overlapY.scale * (overlapY.max - y))
-                limitsX
-                chart
-                |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
+        Animated countdown limitsX limitsYStart limitsYEnd ->
+            drawAnimated settings viewBox chart status countdown limitsX limitsYStart limitsYEnd
 
 
 type alias Fraction value =
@@ -579,7 +606,10 @@ drawFractionsY settings viewBox canvas =
         Static _ limitsY ->
             drawStaticFractionsY viewBox 5 limitsY
 
-        Animated _ countdown _ limitsYStart limitsYEnd ->
+        Delayed _ _ limitsYStart _ ->
+            drawStaticFractionsY viewBox 5 limitsYStart
+
+        Animated countdown _ limitsYStart limitsYEnd ->
             drawAnimatedFractionsY settings viewBox 5 countdown limitsYStart limitsYEnd
 
 
@@ -677,6 +707,10 @@ isSelected visibility =
             True
 
 
+
+-- @TODO Make a better name
+
+
 type alias Status =
     Dict String Visibility
 
@@ -684,7 +718,8 @@ type alias Status =
 type Canvas
     = Empty
     | Static Limits Limits
-    | Animated Float Float Limits Limits Limits
+    | Delayed Float Limits Limits Limits
+    | Animated Float Limits Limits Limits
 
 
 type alias State =
@@ -710,10 +745,10 @@ init settings chart =
             Dict.map (\_ _ -> Visible) (Data.getChartLines chart)
 
         initialMinimap =
-            select settings Nothing chart initialStatus Empty
+            selectAll settings chart initialStatus Empty
 
         initialCanvas =
-            select settings (Just initialRange) chart initialStatus Empty
+            selectWithRange settings True initialRange chart initialStatus Empty
     in
     Model settings chart (State initialRange NoDragging initialStatus initialMinimap initialCanvas)
 
@@ -768,7 +803,7 @@ updateHelp msg settings chart state =
                 Just nextRange ->
                     { state
                         | range = nextRange
-                        , canvas = select settings (Just nextRange) chart state.status state.canvas
+                        , canvas = selectWithRange settings True nextRange chart state.status state.canvas
                     }
             , Cmd.none
             )
@@ -800,8 +835,8 @@ updateHelp msg settings chart state =
             in
             ( { state
                 | status = nextStatus
-                , minimap = select settings Nothing chart nextStatus state.minimap
-                , canvas = select settings (Just state.range) chart nextStatus state.canvas
+                , minimap = selectAll settings chart nextStatus state.minimap
+                , canvas = selectWithRange settings False state.range chart nextStatus state.canvas
               }
             , Cmd.none
             )
@@ -819,7 +854,7 @@ updateHelp msg settings chart state =
             in
             ( { state
                 | range = nextRange
-                , canvas = select settings (Just nextRange) chart state.status state.canvas
+                , canvas = selectWithRange settings True nextRange chart state.status state.canvas
               }
             , Cmd.none
             )
@@ -852,27 +887,31 @@ updateHelp msg settings chart state =
 
                 nextMinimap =
                     case state.minimap of
-                        Animated delay countdown limitsX limitsYStart limitsYEnd ->
+                        Animated countdown limitsX limitsYStart limitsYEnd ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
                             else
-                                Animated delay (countdown - delta) limitsX limitsYStart limitsYEnd
+                                Animated (countdown - delta) limitsX limitsYStart limitsYEnd
 
                         _ ->
                             state.minimap
 
                 nextCanvas =
                     case state.canvas of
-                        Animated delay countdown limitsX limitsYStart limitsYEnd ->
+                        Delayed countdown limitsX limitsYStart limitsYEnd ->
+                            if delta >= countdown then
+                                Animated (settings.animation.duration + delta - countdown) limitsX limitsYStart limitsYEnd
+
+                            else
+                                Delayed (countdown - delta) limitsX limitsYStart limitsYEnd
+
+                        Animated countdown limitsX limitsYStart limitsYEnd ->
                             if delta >= countdown then
                                 Static limitsX limitsYEnd
 
-                            else if delay >= delta then
-                                Animated (delay - delta) countdown limitsX limitsYStart limitsYEnd
-
                             else
-                                Animated 0 (countdown + delay - delta) limitsX limitsYStart limitsYEnd
+                                Animated (countdown - delta) limitsX limitsYStart limitsYEnd
 
                         _ ->
                             state.canvas
@@ -893,7 +932,10 @@ updateHelp msg settings chart state =
 subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
     case state.canvas of
-        Animated _ _ _ _ _ ->
+        Animated _ _ _ _ ->
+            Browser.Events.onAnimationFrameDelta Tick
+
+        Delayed _ _ _ _ ->
             Browser.Events.onAnimationFrameDelta Tick
 
         _ ->
