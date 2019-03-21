@@ -261,8 +261,19 @@ selectAll { animation } chart status canvas =
 
 
 selectWithRange : Settings -> Bool -> Range -> Chart -> Status -> Canvas -> Canvas
-selectWithRange { animation } delayed range chart status canvas =
-    case ( canvas, selectLimits (selectorWithRange range (Data.firstChartX chart) (Data.lastChartX chart)) chart status ) of
+selectWithRange { animation } delayed_ range chart status canvas =
+    let
+        delayed =
+            delayed_ && animation.delay > 0
+    in
+    case
+        ( canvas
+        , selectLimits
+            (selectorWithRange range (Data.firstChartX chart) (Data.lastChartX chart))
+            chart
+            status
+        )
+    of
         ( Empty, Just ( limitsX, limitsY ) ) ->
             Static limitsX (adjustLimitsY 5 limitsY)
 
