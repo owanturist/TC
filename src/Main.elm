@@ -18,9 +18,9 @@ type alias Model =
 
 init : Value -> ( Model, Cmd Msg )
 init json =
-    ( case Data.decode (Decode.map Time.millisToPosix Decode.int) Decode.int json of
+    case Data.decode (Decode.map Time.millisToPosix Decode.int) Decode.int json of
         Err err ->
-            Err err
+            ( Err err, Cmd.none )
 
         Ok chart ->
             Chart.init
@@ -34,9 +34,7 @@ init json =
                     |> Data.mapChartX (toFloat << Time.posixToMillis)
                     |> Data.mapChartY toFloat
                 )
-                |> Ok
-    , Cmd.none
-    )
+                |> Tuple.mapFirst Ok
 
 
 

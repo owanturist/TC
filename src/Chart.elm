@@ -1,5 +1,6 @@
 module Chart exposing (Model, Msg, Settings, init, subscriptions, update, view)
 
+import Browser.Dom
 import Browser.Events
 import DOM
 import Data
@@ -14,6 +15,7 @@ import Regex
 import Svg exposing (Svg, g, path, svg)
 import Svg.Attributes
 import Svg.Keyed
+import Task
 import Time
 
 
@@ -36,17 +38,15 @@ calcDoneLimit start end done =
     start + (end - start) * done
 
 
-calcLimitsOverlap :
-    ViewBox
-    -> Float
-    -> Limits
-    -> Limits
-    ->
-        { min : Float
-        , max : Float
-        , scale : Float
-        }
-calcLimitsOverlap viewBox done limitsStart limitsEnd =
+type alias Overlap =
+    { min : Float
+    , max : Float
+    , scale : Float
+    }
+
+
+calcLimitsOverlap : Viewbox -> Float -> Limits -> Limits -> Overlap
+calcLimitsOverlap viewbox done limitsStart limitsEnd =
     let
         limitStartMin =
             calcDoneLimit limitsStart.min limitsEnd.min done
@@ -56,7 +56,7 @@ calcLimitsOverlap viewBox done limitsStart limitsEnd =
     in
     { min = limitStartMin
     , max = limitStartMax
-    , scale = calcScale viewBox.height (Limits limitStartMin limitStartMax)
+    , scale = calcScale viewbox.height (Limits limitStartMin limitStartMax)
     }
 
 
@@ -421,14 +421,14 @@ drawHelp mapX mapY limitsX chart =
         |> mergePathsToLines (Data.getChartLines chart)
 
 
-drawStatic : ViewBox -> Chart -> Status -> Limits -> Limits -> List ( Data.Line String, Visibility )
-drawStatic viewBox chart status limitsX limitsY =
+drawStatic : Viewbox -> Chart -> Status -> Limits -> Limits -> List ( Data.Line String, Visibility )
+drawStatic viewbox chart status limitsX limitsY =
     let
         scaleX =
-            calcScale viewBox.width limitsX
+            calcScale viewbox.width limitsX
 
         scaleY =
-            calcScale viewBox.height limitsY
+            calcScale viewbox.height limitsY
     in
     chart
         |> Data.filterChartLines (\lineId _ -> Nothing /= Dict.get lineId status)
@@ -439,17 +439,17 @@ drawStatic viewBox chart status limitsX limitsY =
         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
 
-drawAnimated : Settings -> ViewBox -> Chart -> Status -> Float -> Limits -> Limits -> Limits -> List ( Data.Line String, Visibility )
-drawAnimated { animation } viewBox chart status countdown limitsX limitsYStart limitsYEnd =
+drawAnimated : Settings -> Viewbox -> Chart -> Status -> Float -> Limits -> Limits -> Limits -> List ( Data.Line String, Visibility )
+drawAnimated { animation } viewbox chart status countdown limitsX limitsYStart limitsYEnd =
     let
         scaleX =
-            calcScale viewBox.width limitsX
+            calcScale viewbox.width limitsX
 
         done =
             easeOutQuad (1 - countdown / animation.duration)
 
         overlapY =
-            calcLimitsOverlap viewBox done limitsYStart limitsYEnd
+            calcLimitsOverlap viewbox done limitsYStart limitsYEnd
     in
     drawHelp
         (\x -> scaleX * (x - limitsX.min))
@@ -459,20 +459,20 @@ drawAnimated { animation } viewBox chart status countdown limitsX limitsYStart l
         |> List.filterMap (\line -> Maybe.map (Tuple.pair line) (Dict.get line.id status))
 
 
-draw : Settings -> ViewBox -> Chart -> Status -> Canvas -> List ( Data.Line String, Visibility )
-draw settings viewBox chart status canvas =
+draw : Settings -> Viewbox -> Chart -> Status -> Canvas -> List ( Data.Line String, Visibility )
+draw settings viewbox chart status canvas =
     case canvas of
         Empty ->
             []
 
         Static limitsX limitsY ->
-            drawStatic viewBox chart status limitsX limitsY
+            drawStatic viewbox chart status limitsX limitsY
 
         Delayed _ limitsX limitsYStart _ ->
-            drawStatic viewBox chart status limitsX limitsYStart
+            drawStatic viewbox chart status limitsX limitsYStart
 
         Animated countdown limitsX limitsYStart limitsYEnd ->
-            drawAnimated settings viewBox chart status countdown limitsX limitsYStart limitsYEnd
+            drawAnimated settings viewbox chart status countdown limitsX limitsYStart limitsYEnd
 
 
 
@@ -545,7 +545,7 @@ drawStaticFractionsY limitsY =
             calcPointsPerFraction config.fractionsCountY limitsY
 
         scaleY =
-            pointsPerFraction * calcScale config.viewBox.height limitsY
+            pointsPerFraction * calcScale config.viewbox.height limitsY
 
         shiftY =
             limitsY.max / pointsPerFraction
@@ -576,7 +576,7 @@ drawAnimatedFractionsY { animation } countdown limitsYStart limitsYEnd =
             calcPointsPerFraction config.fractionsCountY limitsYStart
 
         overlapYStart =
-            calcLimitsOverlap config.viewBox doneStart limitsYEnd limitsYStart
+            calcLimitsOverlap config.viewbox doneStart limitsYEnd limitsYStart
 
         scaleYStart =
             pointsPerFractionStart * overlapYStart.scale
@@ -588,7 +588,7 @@ drawAnimatedFractionsY { animation } countdown limitsYStart limitsYEnd =
             calcPointsPerFraction config.fractionsCountY limitsYEnd
 
         overlapYEnd =
-            calcLimitsOverlap config.viewBox doneEnd limitsYStart limitsYEnd
+            calcLimitsOverlap config.viewbox doneEnd limitsYStart limitsYEnd
 
         scaleYEnd =
             pointsPerFractionEnd * overlapYEnd.scale
@@ -641,10 +641,10 @@ drawStaticFractionsX limitsX chart =
             calcPointsPerFraction (config.fractionsCountX - 1) limitsX
 
         scaleX =
-            pointsPerFraction * calcScale config.viewBox.width limitsX
+            pointsPerFraction * calcScale config.viewbox.width limitsX
 
         shiftX =
-            toFloat config.viewBox.width / toFloat (config.fractionsCountX * config.fractionsCountX)
+            toFloat config.viewbox.width / toFloat (config.fractionsCountX * config.fractionsCountX)
     in
     List.foldr
         (\timestamp ( fractionIndex, acc ) ->
@@ -793,9 +793,16 @@ type Canvas
     | Animated Float Limits Limits Limits
 
 
+type alias Viewport =
+    { width : Float
+    , height : Float
+    }
+
+
 type alias State =
-    { range : Range
+    { viewport : Maybe Viewport
     , dragging : Dragging
+    , range : Range
     , status : Status
     , minimap : Canvas
     , canvas : Canvas
@@ -806,22 +813,30 @@ type Model
     = Model Settings Chart State
 
 
-init : Settings -> Chart -> Model
+init : Settings -> Chart -> ( Model, Cmd Msg )
 init settings chart =
     let
-        initialRange =
-            Range 0 1
-
         initialStatus =
             Dict.map (\_ _ -> Visible) (Data.getChartLines chart)
-
-        initialMinimap =
-            selectAll settings chart initialStatus Empty
-
-        initialCanvas =
-            selectWithRange settings True initialRange chart initialStatus Empty
     in
-    Model settings chart (State initialRange NoDragging initialStatus initialMinimap initialCanvas)
+    ( State Nothing NoDragging (Range 0 1) initialStatus Empty Empty
+        |> Model settings chart
+    , getViewport settings
+    )
+
+
+getViewport : Settings -> Cmd Msg
+getViewport settings =
+    Task.attempt
+        (\result ->
+            case result of
+                Err err ->
+                    GetViewport (Err err)
+
+                Ok { viewport } ->
+                    GetViewport (Ok (Viewport viewport.width viewport.height))
+        )
+        (Browser.Dom.getViewportOf (nodeID settings.id "root"))
 
 
 
@@ -829,7 +844,9 @@ init settings chart =
 
 
 type Msg
-    = StartSelectorFromChanging Float Float
+    = GetViewport (Result Browser.Dom.Error Viewport)
+    | Resize Int Int
+    | StartSelectorFromChanging Float Float
     | StartSelectorToChanging Float Float
     | StartSelectorAreaChanging Float Float
     | DragSelector Float
@@ -851,6 +868,26 @@ update msg (Model settings chart state) =
 updateHelp : Msg -> Settings -> Chart -> State -> ( State, Cmd Msg )
 updateHelp msg settings chart state =
     case msg of
+        GetViewport (Err err) ->
+            ( state, Cmd.none )
+
+        GetViewport (Ok nextViewport) ->
+            ( case state.viewport of
+                Nothing ->
+                    { state
+                        | viewport = Just nextViewport
+                        , minimap = selectAll settings chart state.status Empty
+                        , canvas = selectWithRange settings True state.range chart state.status Empty
+                    }
+
+                Just _ ->
+                    { state | viewport = Just nextViewport }
+            , Cmd.none
+            )
+
+        Resize _ _ ->
+            ( state, getViewport settings )
+
         StartSelectorFromChanging start width ->
             ( { state | dragging = SelectorFromChanging state.range start width }
             , Cmd.none
@@ -1002,30 +1039,33 @@ updateHelp msg settings chart state =
 
 subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
-    case state.canvas of
-        Animated _ _ _ _ ->
-            Browser.Events.onAnimationFrameDelta Tick
-
-        Delayed _ _ _ _ ->
-            Browser.Events.onAnimationFrameDelta Tick
-
-        _ ->
-            if
-                Dict.foldr
-                    (\_ visibility acc ->
-                        if visibility == Visible then
-                            acc
-
-                        else
-                            True
-                    )
-                    False
-                    state.status
-            then
+    Sub.batch
+        [ Browser.Events.onResize Resize
+        , case state.canvas of
+            Animated _ _ _ _ ->
                 Browser.Events.onAnimationFrameDelta Tick
 
-            else
-                Sub.none
+            Delayed _ _ _ _ ->
+                Browser.Events.onAnimationFrameDelta Tick
+
+            _ ->
+                if
+                    Dict.foldr
+                        (\_ visibility acc ->
+                            if visibility == Visible then
+                                acc
+
+                            else
+                                True
+                        )
+                        False
+                        state.status
+                then
+                    Browser.Events.onAnimationFrameDelta Tick
+
+                else
+                    Sub.none
+        ]
 
 
 
@@ -1065,13 +1105,13 @@ element name modificators =
         modificators
 
 
-type alias ViewBox =
+type alias Viewbox =
     { width : Int
     , height : Int
     }
 
 
-makeViewBox : ViewBox -> String
+makeViewBox : Viewbox -> String
 makeViewBox { width, height } =
     [ 0, 0, width, height ]
         |> List.map String.fromInt
@@ -1079,7 +1119,7 @@ makeViewBox { width, height } =
 
 
 type alias Config =
-    { viewBox : ViewBox
+    { viewbox : Viewbox
     , fractionsCountX : Int
     , fractionsCountY : Int
     }
@@ -1087,7 +1127,7 @@ type alias Config =
 
 config : Config
 config =
-    Config (ViewBox 460 460) 6 5
+    Config (Viewbox 460 460) 6 5
 
 
 containsClass : String -> String -> Bool
@@ -1296,7 +1336,7 @@ viewFractionsX fractions =
         (List.map
             (\fraction ->
                 Svg.text_
-                    [ Svg.Attributes.transform ("translate(" ++ coordinate fraction.position (toFloat config.viewBox.height) ++ ")")
+                    [ Svg.Attributes.transform ("translate(" ++ coordinate fraction.position (toFloat config.viewbox.height) ++ ")")
                     , Svg.Attributes.y "-8"
                     , Svg.Attributes.fontSize "14"
                     , Svg.Attributes.fontWeight "300"
@@ -1323,7 +1363,7 @@ viewFractionsY fractions =
                     , Svg.Attributes.strokeWidth "1"
                     , Svg.Attributes.fill "none"
                     , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
-                    , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewBox.width) 0)
+                    , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewbox.width) 0)
                     ]
                     []
             )
@@ -1381,11 +1421,11 @@ viewCanvas settings chart status range canvas =
         [ Html.Attributes.class (element "canvas" [])
         ]
         [ svg
-            [ Svg.Attributes.viewBox (makeViewBox config.viewBox)
+            [ Svg.Attributes.viewBox (makeViewBox config.viewbox)
             , Svg.Attributes.class (element "svg" [])
             ]
             [ viewFractionsY fractionsY
-            , viewLines 2 settings (draw settings config.viewBox chart status canvas)
+            , viewLines 2 settings (draw settings config.viewbox chart status canvas)
             , viewFractionsTextY fractionsY
             , viewFractionsX fractionsX
             ]
@@ -1396,17 +1436,17 @@ viewCanvas settings chart status range canvas =
 viewMinimap : Settings -> Chart -> Status -> Range -> Dragging -> Canvas -> Html Msg
 viewMinimap settings chart status range dragging minimap =
     let
-        viewBox =
-            ViewBox config.viewBox.width 60
+        viewbox =
+            Viewbox config.viewbox.width 60
     in
     div
         [ Html.Attributes.class (element "minimap" [])
         ]
         [ svg
-            [ Svg.Attributes.viewBox (makeViewBox viewBox)
+            [ Svg.Attributes.viewBox (makeViewBox viewbox)
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewLines 1 settings (draw settings viewBox chart status minimap)
+            [ viewLines 1 settings (draw settings viewbox chart status minimap)
             ]
         , Html.Lazy.lazy2 viewSelector range dragging
         ]
@@ -1493,7 +1533,8 @@ viewLinesVisibility status lines =
 view : Model -> Html Msg
 view (Model settings chart state) =
     div
-        [ Html.Attributes.class block
+        [ Html.Attributes.id (nodeID settings.id "root")
+        , Html.Attributes.class block
         ]
         [ viewCanvas settings chart state.status state.range state.canvas
         , viewContainer
