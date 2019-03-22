@@ -5,7 +5,7 @@ import Browser.Events
 import DOM
 import Data
 import Dict exposing (Dict)
-import Html exposing (Html, div, input, label, span, text)
+import Html exposing (Html, div, input, label, li, span, text, ul)
 import Html.Attributes
 import Html.Events
 import Html.Keyed
@@ -554,7 +554,7 @@ drawSelect :
             { posix : Time.Posix
             , position : Float
             , x : Float
-            , points : List (Data.Line Float)
+            , points : List (Data.Line ( Int, Float ))
             }
 drawSelect viewbox chart status canvas select =
     let
@@ -636,6 +636,9 @@ drawSelect viewbox chart status canvas select =
 
                 mapY y =
                     scaleY * (limitsY.max - y)
+
+                points =
+                    List.map (Tuple.mapSecond (\y -> ( round y, mapY y ))) bunch
             in
             Just
                 { posix = Time.millisToPosix (round x)
@@ -644,7 +647,7 @@ drawSelect viewbox chart status canvas select =
                 , points =
                     mergePathsToLines
                         (Data.getChartLines asd)
-                        (Dict.fromList (List.map (Tuple.mapSecond mapY) bunch))
+                        (Dict.fromList points)
                 }
 
 
@@ -1541,9 +1544,39 @@ monthToDateString month =
             "Dec"
 
 
+weekDayToDateString : Time.Weekday -> String
+weekDayToDateString weekDay =
+    case weekDay of
+        Time.Mon ->
+            "Mon"
+
+        Time.Tue ->
+            "Tue"
+
+        Time.Wed ->
+            "Wed"
+
+        Time.Thu ->
+            "Thu"
+
+        Time.Fri ->
+            "Fri"
+
+        Time.Sat ->
+            "Sat"
+
+        Time.Sun ->
+            "Sun"
+
+
 posixToDateString : Time.Zone -> Time.Posix -> String
 posixToDateString zone posix =
     monthToDateString (Time.toMonth zone posix) ++ " " ++ String.fromInt (Time.toDay zone posix)
+
+
+posixToDayteStringLong : Time.Zone -> Time.Posix -> String
+posixToDayteStringLong zone posix =
+    weekDayToDateString (Time.toWeekday zone posix) ++ ", " ++ posixToDateString zone posix
 
 
 viewFractionsX : List (Fraction Time.Posix) -> Html msg
@@ -1611,7 +1644,7 @@ viewFractionsTextY fractions =
         )
 
 
-viewSelectedPoints : Float -> List (Data.Line Float) -> Svg msg
+viewSelectedPoints : Float -> List (Data.Line ( Int, Float )) -> Svg msg
 viewSelectedPoints x points =
     g
         []
@@ -1629,7 +1662,7 @@ viewSelectedPoints x points =
                 (\point ->
                     circle
                         [ Svg.Attributes.cx (String.fromFloat x)
-                        , Svg.Attributes.cy (String.fromFloat point.value)
+                        , Svg.Attributes.cy (String.fromFloat (Tuple.second point.value))
                         , Svg.Attributes.r "5"
                         , Svg.Attributes.strokeWidth "2"
                         , Svg.Attributes.stroke point.color
@@ -1640,6 +1673,63 @@ viewSelectedPoints x points =
                 points
             )
         ]
+
+
+viewSelectedPopup : Range -> Time.Posix -> Float -> List (Data.Line ( Int, Float )) -> Html msg
+viewSelectedPopup { from, to } posix x points =
+    let
+        position =
+            (x - from) / (to - from)
+
+        ( positionRule, positionValue ) =
+            if position > 0.5 then
+                ( "right", 1 - position )
+
+            else
+                ( "left", position )
+    in
+    if abs position >= 2 then
+        text ""
+
+    else
+        div
+            [ Html.Attributes.class (element "popup-container" [])
+            , Html.Attributes.style "left" (pct position)
+            ]
+            [ div
+                [ Html.Attributes.class (element "popup" [])
+                , Html.Attributes.style "transform" ("translateX(" ++ pct -(clamp 0 1 position) ++ ")")
+                ]
+                [ div
+                    [ Html.Attributes.class (element "popup-title" [])
+                    ]
+                    [ text (posixToDayteStringLong Time.utc posix)
+                    ]
+                , ul
+                    [ Html.Attributes.class (element "popup-info" [])
+                    ]
+                    (List.map
+                        (\point ->
+                            li
+                                [ Html.Attributes.class (element "popup-point" [])
+                                , Html.Attributes.style "color" point.color
+                                ]
+                                [ div
+                                    [ Html.Attributes.class (element "popup-value" [])
+                                    ]
+                                    [ text (String.fromInt (Tuple.first point.value))
+                                    ]
+                                , div
+                                    [ Html.Attributes.class (element "popup-label" [])
+                                    ]
+                                    [ text point.name
+                                    ]
+                                ]
+                        )
+                        points
+                    )
+                ]
+            ]
 
 
 viewCanvas : Settings -> Chart -> Status -> Range -> Maybe Select -> Canvs -> Html Msg
@@ -1672,6 +1762,12 @@ viewCanvas settings chart status range select canvas =
                     viewSelectedPoints conf.x conf.points
             ]
         , viewFractionsX fractionsX
+        , case selectConfig of
+            Nothing ->
+                text ""
+
+            Just conf ->
+                viewSelectedPopup range conf.posix conf.position conf.points
         , div
             [ Html.Attributes.class (element "glass" [])
             , Decode.map2 Click
