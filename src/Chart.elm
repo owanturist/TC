@@ -1127,7 +1127,8 @@ type Msg
     | DragSelector Float
     | DragEndSelector Float
     | SelectLine String
-    | Click Float Float
+    | SelectPoints Float Float
+    | ResetPoints
     | Tick Float
 
 
@@ -1224,12 +1225,17 @@ updateHelp msg settings chart state =
             , Cmd.none
             )
 
-        Click clientX width ->
+        SelectPoints clientX width ->
             let
                 position =
                     state.range.from + (state.range.to - state.range.from) * clientX / width
             in
             ( { state | select = Just (Select position) }
+            , Cmd.none
+            )
+
+        ResetPoints ->
+            ( { state | select = Nothing }
             , Cmd.none
             )
 
@@ -1737,6 +1743,36 @@ viewSelectedPopup { from, to } posix x points =
             ]
 
 
+viewSelectedLine : Range -> Float -> Html Msg
+viewSelectedLine { from, to } x =
+    let
+        position =
+            (x - from) / (to - from)
+    in
+    if abs position >= 1 then
+        text ""
+
+    else
+        div
+            [ Html.Attributes.class (element "selected-line" [])
+            , Html.Attributes.style "left" (pct position)
+            , Html.Events.onClick ResetPoints
+            ]
+            []
+
+
+viewGlass : Html Msg
+viewGlass =
+    div
+        [ Html.Attributes.class (element "glass" [])
+        , Decode.map2 SelectPoints
+            (Decode.field "offsetX" Decode.float)
+            (Decode.at [ "target", "clientWidth" ] Decode.float)
+            |> Html.Events.on "click"
+        ]
+        []
+
+
 viewCanvas : Settings -> Chart -> Status -> Range -> Maybe Select -> Canvs -> Html Msg
 viewCanvas settings chart status range select canvas =
     let
@@ -1767,20 +1803,16 @@ viewCanvas settings chart status range select canvas =
                     viewSelectedPoints conf.x conf.points
             ]
         , viewFractionsX fractionsX
+        , viewGlass
         , case selectConfig of
             Nothing ->
                 text ""
 
             Just conf ->
-                viewSelectedPopup range conf.posix conf.position conf.points
-        , div
-            [ Html.Attributes.class (element "glass" [])
-            , Decode.map2 Click
-                (Decode.field "offsetX" Decode.float)
-                (Decode.at [ "target", "clientWidth" ] Decode.float)
-                |> Html.Events.on "click"
-            ]
-            []
+                div []
+                    [ viewSelectedLine range conf.position
+                    , viewSelectedPopup range conf.posix conf.position conf.points
+                    ]
         ]
 
 
