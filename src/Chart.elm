@@ -261,6 +261,21 @@ tickTransition settings delta transition =
                 Anim (countdown - delta) limitsStart limitsEnd
 
 
+tickTransitionX : Settings -> Float -> ( Limits, List ( Float, Limits ) ) -> ( Limits, List ( Float, Limits ) )
+tickTransitionX settings delta ( limitsXEnd, limitsXStartList ) =
+    ( limitsXEnd
+    , List.filterMap
+        (\( countdown, limitsXStart ) ->
+            if delta >= countdown then
+                Nothing
+
+            else
+                Just ( countdown - delta, limitsXStart )
+        )
+        limitsXStartList
+    )
+
+
 isTransitionRun : Transition a -> Bool
 isTransitionRun transition =
     case transition of
@@ -271,38 +286,15 @@ isTransitionRun transition =
             True
 
 
-selectTransitionX : Settings -> Limits -> Transition Limits -> Transition Limits
-selectTransitionX { animation } limitsX transition =
-    let
-        deltaX =
-            limitsX.max - limitsX.min
-    in
-    case transition of
-        Stat prevLimitsX ->
-            if prevLimitsX.max - prevLimitsX.min == deltaX then
-                Stat limitsX
+selectTransitionX : Settings -> Limits -> ( Limits, List ( Float, Limits ) ) -> ( Limits, List ( Float, Limits ) )
+selectTransitionX { animation } limitsX ( limitsXEnd, limitsXStartList ) =
+    ( limitsX
+    , if limitsXEnd.max - limitsXEnd.min == limitsX.max - limitsX.min then
+        limitsXStartList
 
-            else
-                Anim animation.delay prevLimitsX limitsX
-
-        Del _ limitsXStart limitsXEnd ->
-            Anim animation.delay limitsXEnd limitsX
-
-        Anim countdown limitsXStart limitsXEnd ->
-            if limitsXEnd.max - limitsXEnd.min == deltaX then
-                Anim countdown limitsXEnd limitsX
-
-            else
-                let
-                    done =
-                        easeOutQuad (1 - countdown / animation.duration)
-
-                    doneLimits =
-                        Limits
-                            (calcDone limitsXStart.min limitsXEnd.min done)
-                            (calcDone limitsXStart.max limitsXEnd.max done)
-                in
-                Anim animation.duration doneLimits limitsX
+      else
+        ( animation.duration, limitsXEnd ) :: limitsXStartList
+    )
 
 
 selectTransitionY : Settings -> Limits -> Transition Limits -> Transition Limits
@@ -514,13 +506,7 @@ drawCanvas settings viewbox chart status canvas =
     let
         limitsX =
             case canvas.limitsX of
-                Stat limits ->
-                    limits
-
-                Del _ _ limitsXEnd ->
-                    limitsXEnd
-
-                Anim _ _ limitsXEnd ->
+                ( limitsXEnd, _ ) ->
                     limitsXEnd
     in
     case canvas.limitsY of
@@ -790,14 +776,7 @@ drawAnimatedFractionsX settings chart countdown limitsXStart limitsXEnd =
 drawFractionsX : Settings -> Chart -> Canvs -> List (Fraction Time.Posix)
 drawFractionsX settings chart canvas =
     case canvas.limitsX of
-        Stat limitsX ->
-            drawStaticFractionsX chart limitsX
-
-        Del _ _ limitsXEnd ->
-            drawStaticFractionsX chart limitsXEnd
-
-        Anim countdown limitsXStart limitsXEnd ->
-            -- drawAnimatedFractionsX settings chart countdown limitsXStart limitsXEnd
+        ( limitsXEnd, _ ) ->
             drawStaticFractionsX chart limitsXEnd
 
 
@@ -924,7 +903,7 @@ type alias Can x y =
 
 
 type alias Canvs =
-    Can (Transition Limits) (Transition Limits)
+    Can ( Limits, List ( Float, Limits ) ) (Transition Limits)
 
 
 type alias Minimap =
@@ -961,7 +940,7 @@ init settings chart =
             Can (Limits 0 0) (Stat (Limits 0 0))
 
         initialCanvs =
-            Can (Stat (Limits 0 0)) (Stat (Limits 0 0))
+            Can ( Limits 0 0, [] ) (Stat (Limits 0 0))
     in
     ( State Nothing NoDragging (Range 0 1) initialStatus initialMinimap initialCanvs
         |> Model settings chart
@@ -1125,7 +1104,7 @@ updateHelp msg settings chart state =
             ( { state
                 | status = nextStatus
                 , minimap = Can state.minimap.limitsX (tickTransition settings delta state.minimap.limitsY)
-                , canvs = Can (tickTransition settings delta state.canvs.limitsX) (tickTransition settings delta state.canvs.limitsY)
+                , canvs = Can (Debug.log "" (tickTransitionX settings delta state.canvs.limitsX)) (tickTransition settings delta state.canvs.limitsY)
               }
             , Cmd.none
             )
@@ -1140,7 +1119,7 @@ subscriptions (Model _ _ state) =
     Sub.batch
         [ Browser.Events.onResize Resize
         , if
-            isTransitionRun state.canvs.limitsX
+            not (List.isEmpty (Tuple.second state.canvs.limitsX))
                 || isTransitionRun state.canvs.limitsY
                 || isTransitionRun state.minimap.limitsY
                 || List.any ((/=) Visible) (Dict.values state.status)
