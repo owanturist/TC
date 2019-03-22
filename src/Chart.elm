@@ -5,7 +5,7 @@ import Browser.Events
 import DOM
 import Data
 import Dict exposing (Dict)
-import Html exposing (Html, div, input, label, li, span, text, ul)
+import Html exposing (Html, button, div, input, label, li, span, text, ul)
 import Html.Attributes
 import Html.Events
 import Html.Keyed
@@ -1086,9 +1086,15 @@ type alias Select =
     }
 
 
+type Mode
+    = Night
+    | Day
+
+
 type alias State =
     { viewport : Maybe Viewport
     , select : Maybe Select
+    , mode : Mode
     , minimapDragging : MinimapDragging
     , canvasDragging : CanvasDragging
     , range : Range
@@ -1117,6 +1123,7 @@ init settings chart =
     ( State
         Nothing
         Nothing
+        Day
         NoMinimapDragging
         NoCanvasDragging
         (Range 0 1)
@@ -1160,6 +1167,7 @@ type Msg
     | SelectPoints Float Float
     | ResetPoints
     | SelectLine String
+    | SwitchMode
     | Tick Float
 
 
@@ -1290,6 +1298,16 @@ updateHelp msg settings chart state =
             , Cmd.none
             )
 
+        SwitchMode ->
+            ( case state.mode of
+                Night ->
+                    { state | mode = Day }
+
+                Day ->
+                    { state | mode = Night }
+            , Cmd.none
+            )
+
         Tick delta ->
             let
                 nextStatus =
@@ -1359,14 +1377,14 @@ subscriptions (Model _ _ state) =
 -- V I E W
 
 
+namespace : String
+namespace =
+    "c-h-a-r-t"
+
+
 nodeID : String -> String -> String
 nodeID id name =
-    block ++ "__" ++ id ++ "__" ++ name
-
-
-block : String
-block =
-    "c-h-a-r-t"
+    namespace ++ "__" ++ id ++ "__" ++ name
 
 
 flag : String -> Bool -> ( String, Bool )
@@ -1374,22 +1392,27 @@ flag =
     Tuple.pair
 
 
+modificatorsToClass : String -> ( String, Bool ) -> Maybe String
+modificatorsToClass base ( mod, enabled ) =
+    if enabled then
+        Just (base ++ "_" ++ mod)
+
+    else
+        Nothing
+
+
+block : List ( String, Bool ) -> String
+block modificators =
+    String.join " " (namespace :: List.filterMap (modificatorsToClass namespace) modificators)
+
+
 element : String -> List ( String, Bool ) -> String
 element name modificators =
     let
-        fullName =
-            block ++ "__" ++ name
+        fullname =
+            namespace ++ "__" ++ name
     in
-    List.foldr
-        (\( mod, enabled ) acc ->
-            if enabled then
-                acc ++ " " ++ fullName ++ "_" ++ mod
-
-            else
-                acc
-        )
-        fullName
-        modificators
+    String.join " " (fullname :: List.filterMap (modificatorsToClass fullname) modificators)
 
 
 type alias Viewbox =
@@ -1979,11 +2002,37 @@ viewLinesVisibility status lines =
         )
 
 
+viewModeButton : Mode -> Html Msg
+viewModeButton mode =
+    button
+        [ Html.Attributes.class (element "mode-button" [])
+        , Html.Attributes.type_ "button"
+        , Html.Events.onClick SwitchMode
+        ]
+        [ case mode of
+            Night ->
+                text "Switch to Day Mode"
+
+            Day ->
+                text "Switch to Night Mode"
+        ]
+
+
+viewSpaceCreator : Html msg
+viewSpaceCreator =
+    div [ Html.Attributes.class (element "space-creator" []) ] []
+
+
 view : Model -> Html Msg
 view (Model settings chart state) =
     div
         [ Html.Attributes.id (nodeID settings.id "root")
-        , Html.Attributes.class block
+        , Html.Attributes.class
+            (block
+                [ flag "mode_night" (state.mode == Night)
+                , flag "mode_day" (state.mode == Day)
+                ]
+            )
         ]
         [ viewCanvas settings
             chart
@@ -2002,5 +2051,9 @@ view (Model settings chart state) =
             ]
         , viewContainer
             [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
+            ]
+        , viewSpaceCreator
+        , viewContainer
+            [ viewModeButton state.mode
             ]
         ]

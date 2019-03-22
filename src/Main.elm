@@ -3,9 +3,19 @@ module Main exposing (main)
 import Browser
 import Chart
 import Data
-import Html exposing (code, text)
+import Html exposing (Html, code, text)
 import Json.Decode as Decode exposing (Value)
 import Time
+
+
+
+-- F L A G S
+
+
+type alias Flags =
+    { id : String
+    , data : Value
+    }
 
 
 
@@ -16,17 +26,17 @@ type alias Model =
     Result Decode.Error Chart.Model
 
 
-init : Value -> ( Model, Cmd Msg )
-init json =
-    case Data.decode (Decode.map Time.millisToPosix Decode.int) Decode.int json of
+init : Flags -> ( Model, Cmd Msg )
+init flags =
+    case Data.decode (Decode.map Time.millisToPosix Decode.int) Decode.int flags.data of
         Err err ->
             ( Err err, Cmd.none )
 
         Ok chart ->
             Chart.init
-                { id = "0"
+                { id = flags.id
                 , animation =
-                    { duration = 300
+                    { duration = 500
                     , delay = 50
                     }
                 }
@@ -73,25 +83,23 @@ subscriptions model =
 -- V I E W
 
 
-view : Model -> Browser.Document Msg
+view : Model -> Html Msg
 view model =
-    Browser.Document "Charts"
-        [ case model of
-            Err err ->
-                code [] [ text (Decode.errorToString err) ]
+    case model of
+        Err err ->
+            code [] [ text (Decode.errorToString err) ]
 
-            Ok chart ->
-                Chart.view chart
-        ]
+        Ok chart ->
+            Chart.view chart
 
 
 
 -- M A I N
 
 
-main : Program Value Model Msg
+main : Program Flags Model Msg
 main =
-    Browser.document
+    Browser.element
         { init = init
         , update = update
         , subscriptions = subscriptions
