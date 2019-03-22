@@ -293,7 +293,13 @@ selectTransitionX { animation } limitsX ( limitsXEnd, limitsXStartList ) =
         limitsXStartList
 
       else
-        ( animation.duration, limitsXEnd ) :: limitsXStartList
+        case limitsXStartList of
+            [] ->
+                [ ( animation.duration, limitsXEnd )
+                ]
+
+            ( countdown, firstLimitsXStart ) :: restLimitsXStart ->
+                ( animation.duration - countdown, limitsXEnd ) :: ( countdown, firstLimitsXStart ) :: restLimitsXStart
     )
 
 
@@ -505,9 +511,7 @@ drawCanvas : Settings -> Viewbox -> Chart -> Status -> Canvs -> List ( Data.Line
 drawCanvas settings viewbox chart status canvas =
     let
         limitsX =
-            case canvas.limitsX of
-                ( limitsXEnd, _ ) ->
-                    limitsXEnd
+            Tuple.first canvas.limitsX
     in
     case canvas.limitsY of
         Stat limitsY ->
@@ -676,85 +680,69 @@ drawFractionsY settings canvas =
             drawAnimatedFractionsY settings countdown limitsYStart limitsYEnd
 
 
-drawStaticFractionsXHelp : Float -> Float -> List Float -> Limits -> List (Fraction Time.Posix)
-drawStaticFractionsXHelp first last middle limitsX =
-    let
-        middleLength =
-            List.length middle
+drawStaticFractionsXHelp :
+    List Float
+    -> List (Int -> Float -> Maybe (Fraction Time.Posix))
+    -> List (Fraction Time.Posix)
+drawStaticFractionsXHelp fr bars =
+    List.foldl
+        (\timestamp ( index, acc ) ->
+            ( index + 1
+            , case
+                List.foldr
+                    (\bar result ->
+                        case result of
+                            Nothing ->
+                                bar index timestamp
 
+                            _ ->
+                                result
+                    )
+                    Nothing
+                    bars
+              of
+                Nothing ->
+                    acc
+
+                Just fraction ->
+                    fraction :: acc
+            )
+        )
+        ( 0, [] )
+        fr
+        |> Tuple.second
+
+
+foo : Int -> Float -> Float -> Float -> Limits -> Int -> Float -> Maybe (Fraction Time.Posix)
+foo length first last opacity limitsX =
+    let
         pointsPerFraction =
             calcPointsPerFraction config.fractionsCountX limitsX
 
         each =
-            ceiling (toFloat middleLength * pointsPerFraction / (last - first))
+            ceiling (toFloat (length - 2) * pointsPerFraction / (last - first))
 
         deltaX =
             limitsX.max - limitsX.min
 
-        ( startIndex, normalizedMiddle ) =
-            if remainderBy each middleLength <= each // 2 then
-                ( each // 2
-                , middle
-                    |> List.take (middleLength - each // 2)
-                    |> List.drop (each - each // 2)
-                )
-
-            else
-                ( 1, middle )
-
-        ( _, restFractions ) =
-            List.foldr
-                (\timestamp ( index, acc ) ->
-                    ( index + 1
-                    , if remainderBy each index == 0 then
-                        timestamp :: acc
-
-                      else
-                        acc
-                    )
-                )
-                ( startIndex, [ first ] )
-                normalizedMiddle
-
-        ( _, fractions ) =
-            List.foldr
-                (\timestamp ( neighbour, acc ) ->
-                    if timestamp >= limitsX.min then
-                        if timestamp <= limitsX.max then
-                            ( Nothing
-                            , case neighbour of
-                                Just leftTimestamp ->
-                                    fractionX 1 (round leftTimestamp) ((leftTimestamp - limitsX.min) / deltaX)
-                                        :: fractionX 1 (round timestamp) ((timestamp - limitsX.min) / deltaX)
-                                        :: acc
-
-                                Nothing ->
-                                    fractionX 1 (round timestamp) ((timestamp - limitsX.min) / deltaX)
-                                        :: acc
-                            )
-
-                        else
-                            ( Just timestamp
-                            , if neighbour == Nothing then
-                                fractionX 1 (round timestamp) ((timestamp - limitsX.min) / deltaX) :: acc
-
-                              else
-                                acc
-                            )
-
-                    else
-                        ( Just timestamp
-                        , acc
-                        )
-                )
-                ( Nothing, [] )
-                (last :: restFractions)
+        ( indexFrom, indexTo ) =
+            ( floor ((toFloat length - 1) * (limitsX.min - first) / (last - first))
+            , ceiling ((toFloat length - 1) * (limitsX.max - first) / (last - first))
+            )
     in
-    fractions
+    \index timestamp ->
+        if index >= indexFrom && index <= indexTo && remainderBy each index == 0 then
+            fractionX opacity
+                (round timestamp)
+                ((timestamp - limitsX.min) / deltaX)
+                |> Just
+
+        else
+            Nothing
 
 
-drawStaticFractionsX : Chart -> Limits -> List (Fraction Time.Posix)
-drawStaticFractionsX chart limitsX =
+drawFractionsX : Settings -> Chart -> ( Limits, List ( Float, Limits ) ) -> List (Fraction Time.Posix)
+drawFractionsX { animation } chart ( limitsXEnd, limitsXStartList ) =
     case Data.getChartTimeline chart of
         [] ->
             []
@@ -765,19 +753,37 @@ drawStaticFractionsX chart limitsX =
                     []
 
                 last :: middle ->
-                    drawStaticFractionsXHelp first last middle limitsX
+                    let
+                        length =
+                            List.length middle + 2
+                    in
+                    case limitsXStartList of
+                        [] ->
+                            drawStaticFractionsXHelp (first :: tail)
+                                [ foo length first last 1 limitsXEnd
+                                ]
 
-
-drawAnimatedFractionsX : Settings -> Chart -> Float -> Limits -> Limits -> List (Fraction Time.Posix)
-drawAnimatedFractionsX settings chart countdown limitsXStart limitsXEnd =
-    []
-
-
-drawFractionsX : Settings -> Chart -> Canvs -> List (Fraction Time.Posix)
-drawFractionsX settings chart canvas =
-    case canvas.limitsX of
-        ( limitsXEnd, _ ) ->
-            drawStaticFractionsX chart limitsXEnd
+                        ( countdownFirst, limitsXStartFirst ) :: restLimitsXStart ->
+                            let
+                                doneFirst =
+                                    countdownFirst / animation.duration
+                            in
+                            List.foldl
+                                (\( countdown, limitsXStart ) acc ->
+                                    let
+                                        done =
+                                            countdown / animation.duration
+                                    in
+                                    foo length first last 0 limitsXStart :: acc
+                                )
+                                -- [ foo length first last 0 limitsXStartFirst
+                                -- , foo length first last (1 - doneFirst) limitsXEnd
+                                -- ]
+                                -- restLimitsXStart
+                                [ foo length first last doneFirst limitsXEnd
+                                ]
+                                []
+                                |> drawStaticFractionsXHelp (first :: tail)
 
 
 
@@ -1104,7 +1110,7 @@ updateHelp msg settings chart state =
             ( { state
                 | status = nextStatus
                 , minimap = Can state.minimap.limitsX (tickTransition settings delta state.minimap.limitsY)
-                , canvs = Can (Debug.log "" (tickTransitionX settings delta state.canvs.limitsX)) (tickTransition settings delta state.canvs.limitsY)
+                , canvs = Can (tickTransitionX settings delta state.canvs.limitsX) (tickTransition settings delta state.canvs.limitsY)
               }
             , Cmd.none
             )
@@ -1457,26 +1463,12 @@ viewFractionsTextY fractions =
         )
 
 
-viewScroller : Settings -> Range -> Html Msg
-viewScroller settings range =
-    div
-        [ Html.Attributes.id (nodeID settings.id "scroller")
-        , Html.Attributes.class (element "scroller" [])
-        , Html.Events.on "scroll" (withScrollTopAndWith ScrollCanvas)
-        ]
-        [ div
-            [ Html.Attributes.class (element "scroller-content" [])
-            , Html.Attributes.style "width" (pct (1 / (range.to - range.from)))
-            ]
-            []
-        ]
-
 
 viewCanvas : Settings -> Chart -> Status -> Range -> Canvs -> Html Msg
 viewCanvas settings chart status range canvas =
     let
         fractionsX =
-            drawFractionsX settings chart canvas
+            drawFractionsX settings chart canvas.limitsX
 
         fractionsY =
             drawFractionsY settings canvas
@@ -1493,7 +1485,6 @@ viewCanvas settings chart status range canvas =
             , viewFractionsTextY fractionsY
             ]
         , viewFractionsX fractionsX
-        , viewScroller settings range
         ]
 
 
