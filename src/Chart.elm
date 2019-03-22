@@ -283,14 +283,10 @@ selectTransitionX { animation } limitsX transition =
                 Stat limitsX
 
             else
-                Del animation.delay prevLimitsX limitsX
+                Anim animation.delay prevLimitsX limitsX
 
-        Del countdown limitsXStart limitsXEnd ->
-            if limitsXEnd.max - limitsXEnd.min == deltaX then
-                Del countdown limitsXEnd limitsX
-
-            else
-                Del animation.delay limitsXEnd limitsX
+        Del _ limitsXStart limitsXEnd ->
+            Anim animation.delay limitsXEnd limitsX
 
         Anim countdown limitsXStart limitsXEnd ->
             if limitsXEnd.max - limitsXEnd.min == deltaX then
@@ -697,52 +693,42 @@ drawFractionsY settings canvas =
 drawStaticFractionsXHelp : Float -> Float -> List Float -> Limits -> List (Fraction Time.Posix)
 drawStaticFractionsXHelp first last middle limitsX =
     let
+        middleLength =
+            List.length middle
+
         pointsPerFraction =
             calcPointsPerFraction config.fractionsCountX limitsX
+
+        each =
+            ceiling (toFloat middleLength * pointsPerFraction / (last - first))
 
         deltaX =
             limitsX.max - limitsX.min
 
-        ( _, { timestamps } ) =
+        ( startIndex, normalizedMiddle ) =
+            if remainderBy each middleLength <= each // 2 then
+                ( each // 2
+                , middle
+                    |> List.take (middleLength - each // 2)
+                    |> List.drop (each - each // 2)
+                )
+
+            else
+                ( 1, middle )
+
+        ( _, restFractions ) =
             List.foldr
                 (\timestamp ( index, acc ) ->
                     ( index + 1
-                    , case acc.each of
-                        Nothing ->
-                            if (first + pointsPerFraction) <= timestamp then
-                                { each = Just index
-                                , timestamps = timestamp :: acc.timestamps
-                                }
+                    , if remainderBy each index == 0 then
+                        timestamp :: acc
 
-                            else
-                                acc
-
-                        Just each ->
-                            if remainderBy each index == 0 then
-                                { acc | timestamps = timestamp :: acc.timestamps }
-
-                            else
-                                acc
+                      else
+                        acc
                     )
                 )
-                ( 1
-                , { each = Nothing
-                  , timestamps = [ first ]
-                  }
-                )
-                middle
-
-        timestampsWithLast =
-            case timestamps of
-                [] ->
-                    []
-
-                preLast :: tail ->
-                    if (last - preLast) / pointsPerFraction > 0.5 then
-                        last :: preLast :: tail
-
-                    else
-                        last :: tail
+                ( startIndex, [ first ] )
+                normalizedMiddle
 
         ( _, fractions ) =
             List.foldr
@@ -776,7 +762,7 @@ drawStaticFractionsXHelp first last middle limitsX =
                         )
                 )
                 ( Nothing, [] )
-                timestampsWithLast
+                (last :: restFractions)
     in
     fractions
 
@@ -787,8 +773,8 @@ drawStaticFractionsX chart limitsX =
         [] ->
             []
 
-        first :: rest ->
-            case List.reverse rest of
+        first :: tail ->
+            case List.reverse tail of
                 [] ->
                     []
 
@@ -811,7 +797,8 @@ drawFractionsX settings chart canvas =
             drawStaticFractionsX chart limitsXEnd
 
         Anim countdown limitsXStart limitsXEnd ->
-            drawAnimatedFractionsX settings chart countdown limitsXStart limitsXEnd
+            -- drawAnimatedFractionsX settings chart countdown limitsXStart limitsXEnd
+            drawStaticFractionsX chart limitsXEnd
 
 
 
@@ -1152,20 +1139,11 @@ subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
     Sub.batch
         [ Browser.Events.onResize Resize
-        , if isTransitionRun state.canvs.limitsX || isTransitionRun state.canvs.limitsY || isTransitionRun state.minimap.limitsY then
-            Browser.Events.onAnimationFrameDelta Tick
-
-          else if
-            Dict.foldr
-                (\_ visibility acc ->
-                    if visibility == Visible then
-                        acc
-
-                    else
-                        True
-                )
-                False
-                state.status
+        , if
+            isTransitionRun state.canvs.limitsX
+                || isTransitionRun state.canvs.limitsY
+                || isTransitionRun state.minimap.limitsY
+                || List.any ((/=) Visible) (Dict.values state.status)
           then
             Browser.Events.onAnimationFrameDelta Tick
 
