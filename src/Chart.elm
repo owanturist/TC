@@ -953,17 +953,17 @@ type alias Range =
     }
 
 
-type Dragging
-    = NoDragging
+type MinimapDragging
+    = NoMinimapDragging
     | SelectorFromChanging Range Float Float
     | SelectorToChanging Range Float Float
     | SelectorAreaChanging Range Float Float
 
 
-applyDragging : Dragging -> Float -> Maybe Range
-applyDragging dragging end =
+applySelectorDragging : MinimapDragging -> Float -> Maybe Range
+applySelectorDragging dragging end =
     case dragging of
-        NoDragging ->
+        NoMinimapDragging ->
             Nothing
 
         SelectorFromChanging { from, to } start width ->
@@ -997,6 +997,25 @@ applyDragging dragging end =
                 { from = from + delta
                 , to = to + delta
                 }
+
+
+type CanvasDragging
+    = NoCanvasDragging
+    | SelectorChanging Select Float Float
+
+
+applyCanvasDragging : CanvasDragging -> Float -> State -> State
+applyCanvasDragging dragging end state =
+    case dragging of
+        NoCanvasDragging ->
+            state
+
+        SelectorChanging select width start ->
+            let
+                nextPosition =
+                    select.position + (state.range.to - state.range.from) * ((end - start) / width)
+            in
+            { state | select = Just { select | position = clamp 0 1 nextPosition } }
 
 
 type Visibility
@@ -1070,7 +1089,8 @@ type alias Select =
 type alias State =
     { viewport : Maybe Viewport
     , select : Maybe Select
-    , dragging : Dragging
+    , minimapDragging : MinimapDragging
+    , canvasDragging : CanvasDragging
     , range : Range
     , status : Status
     , minimap : Minimap
@@ -1094,7 +1114,15 @@ init settings chart =
         initialCanvs =
             Can (Stat (Limits 0 0)) (Static (Limits 0 0))
     in
-    ( State Nothing Nothing NoDragging (Range 0 1) initialStatus initialMinimap initialCanvs
+    ( State
+        Nothing
+        Nothing
+        NoMinimapDragging
+        NoCanvasDragging
+        (Range 0 1)
+        initialStatus
+        initialMinimap
+        initialCanvs
         |> Model settings chart
     , getViewport settings
     )
@@ -1126,9 +1154,12 @@ type Msg
     | StartSelectorAreaChanging Float Float
     | DragSelector Float
     | DragEndSelector Float
-    | SelectLine String
+    | StartSelectChanging Float Float
+    | DragSelect Float
+    | DragEndSelect Float
     | SelectPoints Float Float
     | ResetPoints
+    | SelectLine String
     | Tick Float
 
 
@@ -1165,22 +1196,22 @@ updateHelp msg settings chart state =
             ( state, getViewport settings )
 
         StartSelectorFromChanging start width ->
-            ( { state | dragging = SelectorFromChanging state.range start width }
+            ( { state | minimapDragging = SelectorFromChanging state.range start width }
             , Cmd.none
             )
 
         StartSelectorToChanging start width ->
-            ( { state | dragging = SelectorToChanging state.range start width }
+            ( { state | minimapDragging = SelectorToChanging state.range start width }
             , Cmd.none
             )
 
         StartSelectorAreaChanging start width ->
-            ( { state | dragging = SelectorAreaChanging state.range start width }
+            ( { state | minimapDragging = SelectorAreaChanging state.range start width }
             , Cmd.none
             )
 
         DragSelector end ->
-            ( case applyDragging state.dragging end of
+            ( case applySelectorDragging state.minimapDragging end of
                 Nothing ->
                     state
 
@@ -1192,8 +1223,42 @@ updateHelp msg settings chart state =
             , Cmd.none
             )
 
-        DragEndSelector _ ->
-            ( { state | dragging = NoDragging }
+        DragEndSelector start ->
+            ( { state | minimapDragging = NoMinimapDragging }
+            , Cmd.none
+            )
+
+        StartSelectChanging start width ->
+            ( case state.select of
+                Nothing ->
+                    state
+
+                Just select ->
+                    { state | canvasDragging = SelectorChanging select width start }
+            , Cmd.none
+            )
+
+        DragSelect end ->
+            ( applyCanvasDragging state.canvasDragging end state
+            , Cmd.none
+            )
+
+        DragEndSelect _ ->
+            ( { state | canvasDragging = NoCanvasDragging }
+            , Cmd.none
+            )
+
+        SelectPoints clientX width ->
+            let
+                position =
+                    state.range.from + (state.range.to - state.range.from) * clientX / width
+            in
+            ( { state | select = Just (Select position) }
+            , Cmd.none
+            )
+
+        ResetPoints ->
+            ( { state | select = Nothing }
             , Cmd.none
             )
 
@@ -1222,20 +1287,6 @@ updateHelp msg settings chart state =
                 , minimap = Maybe.withDefault state.minimap (selectAll settings chart nextStatus state.minimap)
                 , canvs = Maybe.withDefault state.canvs (selectWithRange settings state.range chart nextStatus state.canvs)
               }
-            , Cmd.none
-            )
-
-        SelectPoints clientX width ->
-            let
-                position =
-                    state.range.from + (state.range.to - state.range.from) * clientX / width
-            in
-            ( { state | select = Just (Select position) }
-            , Cmd.none
-            )
-
-        ResetPoints ->
-            ( { state | select = Nothing }
             , Cmd.none
             )
 
@@ -1442,12 +1493,12 @@ viewContainer =
     div [ Html.Attributes.class (element "container" []) ]
 
 
-viewSelector : Range -> Dragging -> Html Msg
+viewSelector : Range -> MinimapDragging -> Html Msg
 viewSelector range dragging =
     let
         handlers =
             case dragging of
-                NoDragging ->
+                NoMinimapDragging ->
                     []
 
                 _ ->
@@ -1704,43 +1755,50 @@ viewSelectedPopup { from, to } posix x points =
             else
                 ( "left", position )
     in
-    if abs positionValue >= 1 then
-        text ""
-
-    else
-        div
-            [ Html.Attributes.class (element "popup" [])
-            , Html.Attributes.style positionRule (pct positionValue)
+    div
+        [ Html.Attributes.class (element "popup" [])
+        , Html.Attributes.style positionRule (pct positionValue)
+        ]
+        [ div
+            [ Html.Attributes.class (element "popup-title" [])
             ]
-            [ div
-                [ Html.Attributes.class (element "popup-title" [])
-                ]
-                [ text (posixToDayteStringLong Time.utc posix)
-                ]
-            , ul
-                [ Html.Attributes.class (element "popup-info" [])
-                ]
-                (List.map
-                    (\point ->
-                        li
-                            [ Html.Attributes.class (element "popup-point" [])
-                            , Html.Attributes.style "color" point.color
+            [ text (posixToDayteStringLong Time.utc posix)
+            ]
+        , ul
+            [ Html.Attributes.class (element "popup-info" [])
+            ]
+            (List.map
+                (\point ->
+                    li
+                        [ Html.Attributes.class (element "popup-point" [])
+                        , Html.Attributes.style "color" point.color
+                        ]
+                        [ div
+                            [ Html.Attributes.class (element "popup-value" [])
                             ]
-                            [ div
-                                [ Html.Attributes.class (element "popup-value" [])
-                                ]
-                                [ text (String.fromInt (Tuple.first point.value))
-                                ]
-                            , div
-                                [ Html.Attributes.class (element "popup-label" [])
-                                ]
-                                [ text point.name
-                                ]
+                            [ text (String.fromInt (Tuple.first point.value))
                             ]
-                    )
-                    points
+                        , div
+                            [ Html.Attributes.class (element "popup-label" [])
+                            ]
+                            [ text point.name
+                            ]
+                        ]
                 )
-            ]
+                points
+            )
+        ]
+
+
+withSelectedLineTouchAndWidthX : (Float -> Float -> msg) -> Decoder msg
+withSelectedLineTouchAndWidthX tagger =
+    Decode.map2 tagger
+        (Decode.at [ "changedTouches", "0", "pageX" ] Decode.float)
+        (Decode.float
+            |> Decode.field "clientWidth"
+            |> closest (element "canvas" [])
+            |> DOM.target
+        )
 
 
 viewSelectedLine : Range -> Float -> Html Msg
@@ -1749,16 +1807,13 @@ viewSelectedLine { from, to } x =
         position =
             (x - from) / (to - from)
     in
-    if abs position >= 1 then
-        text ""
-
-    else
-        div
-            [ Html.Attributes.class (element "selected-line" [])
-            , Html.Attributes.style "left" (pct position)
-            , Html.Events.onClick ResetPoints
-            ]
-            []
+    div
+        [ Html.Attributes.class (element "selected-line" [])
+        , Html.Attributes.style "left" (pct position)
+        , Html.Events.onClick ResetPoints
+        , Html.Events.on "touchstart" (withSelectedLineTouchAndWidthX StartSelectChanging)
+        ]
+        []
 
 
 viewGlass : Html Msg
@@ -1773,8 +1828,8 @@ viewGlass =
         []
 
 
-viewCanvas : Settings -> Chart -> Status -> Range -> Maybe Select -> Canvs -> Html Msg
-viewCanvas settings chart status range select canvas =
+viewCanvas : Settings -> Chart -> Status -> Range -> Maybe Select -> CanvasDragging -> Canvs -> Html Msg
+viewCanvas settings chart status range select dragging canvas =
     let
         fractionsX =
             drawFractionsX settings chart canvas.limitsX
@@ -1784,10 +1839,21 @@ viewCanvas settings chart status range select canvas =
 
         selectConfig =
             Maybe.andThen (drawSelect settings config.viewbox chart status canvas) select
+
+        handlers =
+            case dragging of
+                NoCanvasDragging ->
+                    []
+
+                _ ->
+                    [ Html.Events.on "touchmove" (withTouchX DragSelect)
+                    , Html.Events.on "touchend" (withTouchX DragEndSelect)
+                    ]
     in
     div
-        [ Html.Attributes.class (element "canvas" [])
-        ]
+        (Html.Attributes.class (element "canvas" [])
+            :: handlers
+        )
         [ svg
             [ Svg.Attributes.viewBox (makeViewBox config.viewbox)
             , Svg.Attributes.class (element "svg" [])
@@ -1816,7 +1882,7 @@ viewCanvas settings chart status range select canvas =
         ]
 
 
-viewMinimap : Settings -> Chart -> Status -> Range -> Dragging -> Minimap -> Html Msg
+viewMinimap : Settings -> Chart -> Status -> Range -> MinimapDragging -> Minimap -> Html Msg
 viewMinimap settings chart status range dragging minimap =
     let
         viewbox =
@@ -1919,9 +1985,20 @@ view (Model settings chart state) =
         [ Html.Attributes.id (nodeID settings.id "root")
         , Html.Attributes.class block
         ]
-        [ viewCanvas settings chart state.status state.range state.select state.canvs
+        [ viewCanvas settings
+            chart
+            state.status
+            state.range
+            state.select
+            state.canvasDragging
+            state.canvs
         , viewContainer
-            [ viewMinimap settings chart state.status state.range state.dragging state.minimap
+            [ viewMinimap settings
+                chart
+                state.status
+                state.range
+                state.minimapDragging
+                state.minimap
             ]
         , viewContainer
             [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
