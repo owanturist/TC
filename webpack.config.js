@@ -11,15 +11,18 @@ module.exports = _env => {
     const env = _env || {};
 
     return {
-        entry: [
-            'normalize.css',
-            path.resolve('./src/styles.pcss'),
-            path.resolve('./src/app.js')
-        ],
+        entry: {
+            fixture: path.resolve('./fixture.js'),
+            app: [
+                'normalize.css',
+                path.resolve('./src/styles.pcss'),
+                path.resolve('./src/app.js')
+            ]
+        },
 
         output: {
             path: path.resolve('./build'),
-            filename: '_[hash].js'
+            filename: '_[name]-[hash].js'
         },
 
         module: {
@@ -80,6 +83,8 @@ module.exports = _env => {
             new HtmlWebpackPlugin({
                 template: path.resolve('./src/index.html'),
                 inject: 'body',
+                chunks: [ 'fixture', 'app' ],
+                chunksSortMode: 'manual',
                 minify: env.prod && {
                     caseSensitive: true,
                     collapseBooleanAttributes: true,
@@ -94,7 +99,7 @@ module.exports = _env => {
             })
         ].concat(env.prod ? [
             new MiniCssExtractPlugin({
-                filename: "_[hash].css",
+                filename: "_[name]-[hash].css",
                 chunkFilename: "[id].css"
             }),
             new BundleAnalyzerPlugin({
