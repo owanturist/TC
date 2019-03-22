@@ -544,7 +544,8 @@ drawCanvas settings viewbox chart status canvas =
 
 
 drawSelect :
-    Viewbox
+    Settings
+    -> Viewbox
     -> Chart
     -> Status
     -> Canvs
@@ -556,7 +557,7 @@ drawSelect :
             , x : Float
             , points : List (Data.Line ( Int, Float ))
             }
-drawSelect viewbox chart status canvas select =
+drawSelect { animation } viewbox chart status canvas select =
     let
         filteredChart =
             Data.filterChartLines
@@ -614,28 +615,37 @@ drawSelect viewbox chart status canvas select =
                         Anim _ limitsXEnd _ ->
                             limitsXEnd
 
-                limitsY =
+                mapY =
                     case canvas.limitsY of
                         Static limitsYEnd ->
-                            limitsYEnd
+                            let
+                                scaleY =
+                                    calcScale viewbox.height limitsYEnd
+                            in
+                            \y -> scaleY * (limitsYEnd.max - y)
 
-                        Delayed _ _ limitsYEnd ->
-                            limitsYEnd
+                        Delayed _ limitsYStart _ ->
+                            let
+                                scaleY =
+                                    calcScale viewbox.height limitsYStart
+                            in
+                            \y -> scaleY * (limitsYStart.max - y)
 
-                        Animated _ _ limitsYEnd ->
-                            limitsYEnd
+                        Animated countdown limitsYStart limitsYEnd ->
+                            let
+                                overlapY =
+                                    calcLimitsOverlap viewbox
+                                        (easeOutQuad (1 - countdown / animation.duration))
+                                        limitsYStart
+                                        limitsYEnd
+                            in
+                            \y -> overlapY.scale * (overlapY.max - y)
 
                 scaleX =
                     calcScale viewbox.width limitsX
 
-                scaleY =
-                    calcScale viewbox.height limitsY
-
                 mapX xx =
                     scaleX * (xx - limitsX.min)
-
-                mapY y =
-                    scaleY * (limitsY.max - y)
 
                 points =
                     List.map (Tuple.mapSecond (\y -> ( round y, mapY y ))) bunch
@@ -1737,7 +1747,7 @@ viewCanvas settings chart status range select canvas =
             drawFractionsY settings canvas
 
         selectConfig =
-            Maybe.andThen (drawSelect config.viewbox chart status canvas) select
+            Maybe.andThen (drawSelect settings config.viewbox chart status canvas) select
     in
     div
         [ Html.Attributes.class (element "canvas" [])
