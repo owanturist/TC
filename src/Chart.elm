@@ -243,86 +243,100 @@ selectLimits selector chart status =
 tickTransition : Settings -> Float -> Transition Limits -> Transition Limits
 tickTransition settings delta transition =
     case transition of
-        Stat limits ->
-            Stat limits
+        Static limits ->
+            Static limits
 
-        Del countdown limitsStart limitsEnd ->
+        Delayed countdown limitsStart limitsEnd ->
             if delta >= countdown then
-                Anim (settings.animation.duration + delta - countdown) limitsStart limitsEnd
+                Animated (settings.animation.duration + delta - countdown) limitsStart limitsEnd
 
             else
-                Del (countdown - delta) limitsStart limitsEnd
+                Delayed (countdown - delta) limitsStart limitsEnd
 
-        Anim countdown limitsStart limitsEnd ->
+        Animated countdown limitsStart limitsEnd ->
             if delta >= countdown then
-                Stat limitsEnd
+                Static limitsEnd
 
             else
-                Anim (countdown - delta) limitsStart limitsEnd
+                Animated (countdown - delta) limitsStart limitsEnd
 
 
-tickTransitionX : Settings -> Float -> ( Limits, List ( Float, Limits ) ) -> ( Limits, List ( Float, Limits ) )
-tickTransitionX settings delta ( limitsXEnd, limitsXStartList ) =
-    ( limitsXEnd
-    , List.filterMap
-        (\( countdown, limitsXStart ) ->
+tickTransitionX : Settings -> Float -> Trans Limits -> Trans Limits
+tickTransitionX settings delta transition =
+    case transition of
+        Stat limitsXEnd ->
+            Stat limitsXEnd
+
+        Anim countdown limitsXEnd limitsXStartList ->
             if delta >= countdown then
-                Nothing
+                Stat limitsXEnd
 
             else
-                Just ( countdown - delta, limitsXStart )
-        )
-        limitsXStartList
-    )
+                Anim (countdown - delta)
+                    limitsXEnd
+                    (List.filterMap
+                        (\( cd, limitsXStart ) ->
+                            if delta >= cd then
+                                Nothing
+
+                            else
+                                Just ( cd - delta, limitsXStart )
+                        )
+                        limitsXStartList
+                    )
 
 
 isTransitionRun : Transition a -> Bool
 isTransitionRun transition =
     case transition of
-        Stat _ ->
+        Static _ ->
             False
 
         _ ->
             True
 
 
-selectTransitionX : Settings -> Limits -> ( Limits, List ( Float, Limits ) ) -> ( Limits, List ( Float, Limits ) )
-selectTransitionX { animation } limitsX ( limitsXEnd, limitsXStartList ) =
-    ( limitsX
-    , if limitsXEnd.max - limitsXEnd.min == limitsX.max - limitsX.min then
-        limitsXStartList
+selectTransitionX : Settings -> Limits -> Trans Limits -> Trans Limits
+selectTransitionX { animation } limitsX transition =
+    case transition of
+        Stat limitsXEnd ->
+            if limitsXEnd.max - limitsXEnd.min == limitsX.max - limitsX.min then
+                Stat limitsX
 
-      else
-        case limitsXStartList of
-            [] ->
-                [ ( animation.duration, limitsXEnd )
-                ]
+            else
+                Anim animation.duration
+                    limitsX
+                    [ ( animation.duration, limitsXEnd )
+                    ]
 
-            ( countdown, firstLimitsXStart ) :: restLimitsXStart ->
-                ( animation.duration - countdown, limitsXEnd ) :: ( countdown, firstLimitsXStart ) :: restLimitsXStart
-    )
+        Anim countdown limitsXEnd limitsXStartList ->
+            if limitsXEnd.max - limitsXEnd.min == limitsX.max - limitsX.min then
+                Anim countdown limitsX limitsXStartList
+
+            else
+                Anim animation.duration limitsX (( animation.duration - countdown, limitsXEnd ) :: limitsXStartList)
 
 
 selectTransitionY : Settings -> Limits -> Transition Limits -> Transition Limits
 selectTransitionY { animation } limitsY transition =
     case transition of
-        Stat prevLimitsY ->
+        Static prevLimitsY ->
             if prevLimitsY == limitsY then
-                Stat limitsY
+                Static limitsY
 
             else
-                Del animation.delay prevLimitsY limitsY
+                Delayed animation.delay prevLimitsY limitsY
 
-        Del countdown limitsYStart limitsYEnd ->
+        Delayed countdown limitsYStart limitsYEnd ->
             if limitsYEnd == limitsY then
-                Del countdown limitsYStart limitsYEnd
+                Delayed countdown limitsYStart limitsYEnd
 
             else
-                Del animation.delay limitsYStart limitsY
+                Delayed animation.delay limitsYStart limitsY
 
-        Anim countdown limitsYStart limitsYEnd ->
+        Animated countdown limitsYStart limitsYEnd ->
             if limitsYEnd == limitsY then
-                Anim countdown limitsYStart limitsYEnd
+                Animated countdown limitsYStart limitsYEnd
 
             else
                 let
@@ -334,7 +348,7 @@ selectTransitionY { animation } limitsY transition =
                             (calcDone limitsYStart.min limitsYEnd.min done)
                             (calcDone limitsYStart.max limitsYEnd.max done)
                 in
-                Anim animation.duration doneLimits limitsY
+                Animated animation.duration doneLimits limitsY
 
 
 selectAll : Settings -> Chart -> Status -> Minimap -> Maybe Minimap
@@ -497,13 +511,13 @@ drawAnimated { animation } viewbox chart status countdown limitsX limitsYStart l
 drawMinimap : Settings -> Viewbox -> Chart -> Status -> Minimap -> List ( Data.Line String, Visibility )
 drawMinimap settings viewbox chart status minimap =
     case minimap.limitsY of
-        Stat limitsY ->
+        Static limitsY ->
             drawStatic viewbox chart status minimap.limitsX limitsY
 
-        Del _ limitsYStart _ ->
+        Delayed _ limitsYStart _ ->
             drawStatic viewbox chart status minimap.limitsX limitsYStart
 
-        Anim countdown limitsYStart limitsYEnd ->
+        Animated countdown limitsYStart limitsYEnd ->
             drawAnimated settings viewbox chart status countdown minimap.limitsX limitsYStart limitsYEnd
 
 
@@ -511,16 +525,21 @@ drawCanvas : Settings -> Viewbox -> Chart -> Status -> Canvs -> List ( Data.Line
 drawCanvas settings viewbox chart status canvas =
     let
         limitsX =
-            Tuple.first canvas.limitsX
+            case canvas.limitsX of
+                Stat limitsXEnd ->
+                    limitsXEnd
+
+                Anim _ limitsXEnd _ ->
+                    limitsXEnd
     in
     case canvas.limitsY of
-        Stat limitsY ->
+        Static limitsY ->
             drawStatic viewbox chart status limitsX limitsY
 
-        Del _ limitsYStart _ ->
+        Delayed _ limitsYStart _ ->
             drawStatic viewbox chart status limitsX limitsYStart
 
-        Anim countdown limitsYStart limitsYEnd ->
+        Animated countdown limitsYStart limitsYEnd ->
             drawAnimated settings viewbox chart status countdown limitsX limitsYStart limitsYEnd
 
 
@@ -670,13 +689,13 @@ drawAnimatedFractionsY { animation } countdown limitsYStart limitsYEnd =
 drawFractionsY : Settings -> Canvs -> List (Fraction Int)
 drawFractionsY settings canvas =
     case canvas.limitsY of
-        Stat limitsY ->
+        Static limitsY ->
             drawStaticFractionsY limitsY
 
-        Del _ limitsYStart _ ->
+        Delayed _ limitsYStart _ ->
             drawStaticFractionsY limitsYStart
 
-        Anim countdown limitsYStart limitsYEnd ->
+        Animated countdown limitsYStart limitsYEnd ->
             drawAnimatedFractionsY settings countdown limitsYStart limitsYEnd
 
 
@@ -741,8 +760,8 @@ foo length first last opacity limitsX =
             Nothing
 
 
-drawFractionsX : Settings -> Chart -> ( Limits, List ( Float, Limits ) ) -> List (Fraction Time.Posix)
-drawFractionsX { animation } chart ( limitsXEnd, limitsXStartList ) =
+drawFractionsX : Settings -> Chart -> Trans Limits -> List (Fraction Time.Posix)
+drawFractionsX { animation } chart transition =
     case Data.getChartTimeline chart of
         [] ->
             []
@@ -757,32 +776,30 @@ drawFractionsX { animation } chart ( limitsXEnd, limitsXStartList ) =
                         length =
                             List.length middle + 2
                     in
-                    case limitsXStartList of
-                        [] ->
+                    case transition of
+                        Stat limitsXEnd ->
                             drawStaticFractionsXHelp (first :: tail)
                                 [ foo length first last 1 limitsXEnd
                                 ]
 
-                        ( countdownFirst, limitsXStartFirst ) :: restLimitsXStart ->
+                        Anim countdown limitsXEnd limitsXStartList ->
                             let
-                                doneFirst =
-                                    countdownFirst / animation.duration
+                                opacityFirst =
+                                    -- 0 → 1
+                                    1 - countdown / animation.duration
                             in
                             List.foldl
-                                (\( countdown, limitsXStart ) acc ->
+                                (\( cd, limitsXStart ) acc ->
                                     let
-                                        done =
-                                            countdown / animation.duration
+                                        opacity =
+                                            -- 1 → 0
+                                            cd / animation.duration
                                     in
-                                    foo length first last 0 limitsXStart :: acc
+                                    foo length first last opacity limitsXStart :: acc
                                 )
-                                -- [ foo length first last 0 limitsXStartFirst
-                                -- , foo length first last (1 - doneFirst) limitsXEnd
-                                -- ]
-                                -- restLimitsXStart
-                                [ foo length first last doneFirst limitsXEnd
+                                [ foo length first last opacityFirst limitsXEnd
                                 ]
-                                []
+                                limitsXStartList
                                 |> drawStaticFractionsXHelp (first :: tail)
 
 
@@ -889,9 +906,14 @@ type alias Status =
 
 
 type Transition a
+    = Static a
+    | Delayed Float a a
+    | Animated Float a a
+
+
+type Trans a
     = Stat a
-    | Del Float a a
-    | Anim Float a a
+    | Anim Float a (List ( Float, a ))
 
 
 
@@ -909,7 +931,7 @@ type alias Can x y =
 
 
 type alias Canvs =
-    Can ( Limits, List ( Float, Limits ) ) (Transition Limits)
+    Can (Trans Limits) (Transition Limits)
 
 
 type alias Minimap =
@@ -943,10 +965,10 @@ init settings chart =
             Dict.map (\_ _ -> Visible) (Data.getChartLines chart)
 
         initialMinimap =
-            Can (Limits 0 0) (Stat (Limits 0 0))
+            Can (Limits 0 0) (Static (Limits 0 0))
 
         initialCanvs =
-            Can ( Limits 0 0, [] ) (Stat (Limits 0 0))
+            Can (Stat (Limits 0 0)) (Static (Limits 0 0))
     in
     ( State Nothing NoDragging (Range 0 1) initialStatus initialMinimap initialCanvs
         |> Model settings chart
@@ -981,7 +1003,6 @@ type Msg
     | DragSelector Float
     | DragEndSelector Float
     | SelectLine String
-    | ScrollCanvas Float Float
     | Tick Float
 
 
@@ -1078,9 +1099,6 @@ updateHelp msg settings chart state =
             , Cmd.none
             )
 
-        ScrollCanvas scrollTop scrollWidth ->
-            ( state, Cmd.none )
-
         Tick delta ->
             let
                 nextStatus =
@@ -1122,10 +1140,19 @@ updateHelp msg settings chart state =
 
 subscriptions : Model -> Sub Msg
 subscriptions (Model _ _ state) =
+    let
+        jj =
+            case state.canvs.limitsX of
+                Stat _ ->
+                    False
+
+                Anim _ _ _ ->
+                    True
+    in
     Sub.batch
         [ Browser.Events.onResize Resize
         , if
-            not (List.isEmpty (Tuple.second state.canvs.limitsX))
+            jj
                 || isTransitionRun state.canvs.limitsY
                 || isTransitionRun state.minimap.limitsY
                 || List.any ((/=) Visible) (Dict.values state.status)
@@ -1461,7 +1488,6 @@ viewFractionsTextY fractions =
             )
             fractions
         )
-
 
 
 viewCanvas : Settings -> Chart -> Status -> Range -> Canvs -> Html Msg
