@@ -558,7 +558,7 @@ drawSelect :
             }
 drawSelect viewbox chart status canvas select =
     let
-        asd =
+        filteredChart =
             Data.filterChartLines
                 (\lineId _ ->
                     Dict.get lineId status
@@ -598,7 +598,7 @@ drawSelect viewbox chart status canvas select =
                             acc
                 )
                 { prev = Nothing, result = Nothing }
-                asd
+                filteredChart
     in
     case result of
         Nothing ->
@@ -642,11 +642,11 @@ drawSelect viewbox chart status canvas select =
             in
             Just
                 { posix = Time.millisToPosix (round x)
-                , position = select.position
+                , position = (x - firstX) / (lastX - firstX)
                 , x = mapX x
                 , points =
                     mergePathsToLines
-                        (Data.getChartLines asd)
+                        (Data.getChartLines filteredChart)
                         (Dict.fromList points)
                 }
 
@@ -1688,47 +1688,42 @@ viewSelectedPopup { from, to } posix x points =
             else
                 ( "left", position )
     in
-    if abs position >= 2 then
+    if abs positionValue >= 1 then
         text ""
 
     else
         div
-            [ Html.Attributes.class (element "popup-container" [])
-            , Html.Attributes.style "left" (pct position)
+            [ Html.Attributes.class (element "popup" [])
+            , Html.Attributes.style positionRule (pct positionValue)
             ]
             [ div
-                [ Html.Attributes.class (element "popup" [])
-                , Html.Attributes.style "transform" ("translateX(" ++ pct -(clamp 0 1 position) ++ ")")
+                [ Html.Attributes.class (element "popup-title" [])
                 ]
-                [ div
-                    [ Html.Attributes.class (element "popup-title" [])
-                    ]
-                    [ text (posixToDayteStringLong Time.utc posix)
-                    ]
-                , ul
-                    [ Html.Attributes.class (element "popup-info" [])
-                    ]
-                    (List.map
-                        (\point ->
-                            li
-                                [ Html.Attributes.class (element "popup-point" [])
-                                , Html.Attributes.style "color" point.color
+                [ text (posixToDayteStringLong Time.utc posix)
+                ]
+            , ul
+                [ Html.Attributes.class (element "popup-info" [])
+                ]
+                (List.map
+                    (\point ->
+                        li
+                            [ Html.Attributes.class (element "popup-point" [])
+                            , Html.Attributes.style "color" point.color
+                            ]
+                            [ div
+                                [ Html.Attributes.class (element "popup-value" [])
                                 ]
-                                [ div
-                                    [ Html.Attributes.class (element "popup-value" [])
-                                    ]
-                                    [ text (String.fromInt (Tuple.first point.value))
-                                    ]
-                                , div
-                                    [ Html.Attributes.class (element "popup-label" [])
-                                    ]
-                                    [ text point.name
-                                    ]
+                                [ text (String.fromInt (Tuple.first point.value))
                                 ]
-                        )
-                        points
+                            , div
+                                [ Html.Attributes.class (element "popup-label" [])
+                                ]
+                                [ text point.name
+                                ]
+                            ]
                     )
-                ]
+                    points
+                )
             ]
 
 
