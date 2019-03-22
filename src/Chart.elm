@@ -12,7 +12,7 @@ import Html.Keyed
 import Html.Lazy
 import Json.Decode as Decode exposing (Decoder)
 import Regex
-import Svg exposing (Svg, g, path, svg)
+import Svg exposing (Svg, circle, g, path, svg)
 import Svg.Attributes
 import Svg.Keyed
 import Task
@@ -74,7 +74,7 @@ calcPointsPerFraction fractionsCount limits =
     (limits.max - limits.min) / toFloat fractionsCount
 
 
-mergePathsToLines : Dict String (Data.Line a) -> Dict String String -> List (Data.Line String)
+mergePathsToLines : Dict String (Data.Line a) -> Dict String b -> List (Data.Line b)
 mergePathsToLines lines paths =
     let
         {- indicate a difference between input and output lineIds dicts -}
@@ -543,6 +543,111 @@ drawCanvas settings viewbox chart status canvas =
             drawAnimated settings viewbox chart status countdown limitsX limitsYStart limitsYEnd
 
 
+drawSelect :
+    Viewbox
+    -> Chart
+    -> Status
+    -> Canvs
+    -> Select
+    ->
+        Maybe
+            { posix : Time.Posix
+            , position : Float
+            , x : Float
+            , points : List (Data.Line Float)
+            }
+drawSelect viewbox chart status canvas select =
+    let
+        asd =
+            Data.filterChartLines
+                (\lineId _ ->
+                    Dict.get lineId status
+                        |> Maybe.map isSelected
+                        |> Maybe.withDefault False
+                )
+                chart
+
+        ( firstX, lastX ) =
+            ( Data.firstChartX chart, Data.lastChartX chart )
+
+        { result } =
+            Data.foldlChart
+                (\x bunch acc ->
+                    case acc.result of
+                        Nothing ->
+                            let
+                                position =
+                                    (x - firstX) / (lastX - firstX)
+                            in
+                            if position >= select.position then
+                                case acc.prev of
+                                    Nothing ->
+                                        { acc | result = Just ( x, bunch ) }
+
+                                    Just ( prevPosition, prevX, prevBunch ) ->
+                                        if position - select.position <= select.position - prevPosition then
+                                            { acc | result = Just ( x, bunch ) }
+
+                                        else
+                                            { acc | result = Just ( prevX, prevBunch ) }
+
+                            else
+                                { acc | prev = Just ( position, x, bunch ) }
+
+                        _ ->
+                            acc
+                )
+                { prev = Nothing, result = Nothing }
+                asd
+    in
+    case result of
+        Nothing ->
+            Nothing
+
+        Just ( x, bunch ) ->
+            let
+                limitsX =
+                    case canvas.limitsX of
+                        Stat limitsXEnd ->
+                            limitsXEnd
+
+                        Anim _ limitsXEnd _ ->
+                            limitsXEnd
+
+                limitsY =
+                    case canvas.limitsY of
+                        Static limitsYEnd ->
+                            limitsYEnd
+
+                        Delayed _ _ limitsYEnd ->
+                            limitsYEnd
+
+                        Animated _ _ limitsYEnd ->
+                            limitsYEnd
+
+                scaleX =
+                    calcScale viewbox.width limitsX
+
+                scaleY =
+                    calcScale viewbox.height limitsY
+
+                mapX xx =
+                    scaleX * (xx - limitsX.min)
+
+                mapY y =
+                    scaleY * (limitsY.max - y)
+            in
+            Just
+                { posix = Time.millisToPosix (round x)
+                , position = select.position
+                , x = mapX x
+                , points =
+                    mergePathsToLines
+                        (Data.getChartLines asd)
+                        (Dict.fromList (List.map (Tuple.mapSecond mapY) bunch))
+                }
+
+
 
 -- @TODO move color directly to view
 
@@ -944,8 +1049,14 @@ type alias Viewport =
     }
 
 
+type alias Select =
+    { position : Float
+    }
+
+
 type alias State =
     { viewport : Maybe Viewport
+    , select : Maybe Select
     , dragging : Dragging
     , range : Range
     , status : Status
@@ -970,7 +1081,7 @@ init settings chart =
         initialCanvs =
             Can (Stat (Limits 0 0)) (Static (Limits 0 0))
     in
-    ( State Nothing NoDragging (Range 0 1) initialStatus initialMinimap initialCanvs
+    ( State Nothing Nothing NoDragging (Range 0 1) initialStatus initialMinimap initialCanvs
         |> Model settings chart
     , getViewport settings
     )
@@ -1102,44 +1213,12 @@ updateHelp msg settings chart state =
 
         Click clientX width ->
             let
-                targetPosition =
+                position =
                     state.range.from + (state.range.to - state.range.from) * clientX / width
-
-                ( firstX, lastX ) =
-                    ( Data.firstChartX chart, Data.lastChartX chart )
-
-                asdklj =
-                    Data.foldlChart
-                        (\x bunch acc ->
-                            case acc.result of
-                                Nothing ->
-                                    let
-                                        position =
-                                            (x - firstX) / (lastX - firstX)
-                                    in
-                                    if position >= targetPosition then
-                                        case acc.prev of
-                                            Nothing ->
-                                                { acc | result = Just ( x, bunch ) }
-
-                                            Just ( prevPosition, prevX, prevBunch ) ->
-                                                if position - targetPosition <= targetPosition - prevPosition then
-                                                    { acc | result = Just ( x, bunch ) }
-
-                                                else
-                                                    { acc | result = Just ( prevX, prevBunch ) }
-
-                                    else
-                                        { acc | prev = Just ( position, x, bunch ) }
-
-                                _ ->
-                                    acc
-                        )
-                        { prev = Nothing, result = Nothing }
-                        chart
-                        |> Debug.log ""
             in
-            ( state, Cmd.none )
+            ( { state | select = Just (Select position) }
+            , Cmd.none
+            )
 
         Tick delta ->
             let
@@ -1532,14 +1611,48 @@ viewFractionsTextY fractions =
         )
 
 
-viewCanvas : Settings -> Chart -> Status -> Range -> Canvs -> Html Msg
-viewCanvas settings chart status range canvas =
+viewSelectedPoints : Float -> List (Data.Line Float) -> Svg msg
+viewSelectedPoints x points =
+    g
+        []
+        [ path
+            [ Svg.Attributes.transform ("translate(" ++ coordinate x 0 ++ ")")
+            , Svg.Attributes.stroke "#dce3ea"
+            , Svg.Attributes.strokeWidth "1"
+            , Svg.Attributes.fill "none"
+            , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate 0 (toFloat config.viewbox.height))
+            ]
+            []
+        , g
+            []
+            (List.map
+                (\point ->
+                    circle
+                        [ Svg.Attributes.cx (String.fromFloat x)
+                        , Svg.Attributes.cy (String.fromFloat point.value)
+                        , Svg.Attributes.r "5"
+                        , Svg.Attributes.strokeWidth "2"
+                        , Svg.Attributes.stroke point.color
+                        , Svg.Attributes.fill "#fff"
+                        ]
+                        []
+                )
+                points
+            )
+        ]
+
+
+viewCanvas : Settings -> Chart -> Status -> Range -> Maybe Select -> Canvs -> Html Msg
+viewCanvas settings chart status range select canvas =
     let
         fractionsX =
             drawFractionsX settings chart canvas.limitsX
 
         fractionsY =
             drawFractionsY settings canvas
+
+        selectConfig =
+            Maybe.andThen (drawSelect config.viewbox chart status canvas) select
     in
     div
         [ Html.Attributes.class (element "canvas" [])
@@ -1551,6 +1664,12 @@ viewCanvas settings chart status range canvas =
             [ viewFractionsY fractionsY
             , viewLines 2 settings (drawCanvas settings config.viewbox chart status canvas)
             , viewFractionsTextY fractionsY
+            , case selectConfig of
+                Nothing ->
+                    Svg.text ""
+
+                Just conf ->
+                    viewSelectedPoints conf.x conf.points
             ]
         , viewFractionsX fractionsX
         , div
@@ -1667,7 +1786,7 @@ view (Model settings chart state) =
         [ Html.Attributes.id (nodeID settings.id "root")
         , Html.Attributes.class block
         ]
-        [ viewCanvas settings chart state.status state.range state.canvs
+        [ viewCanvas settings chart state.status state.range state.select state.canvs
         , viewContainer
             [ viewMinimap settings chart state.status state.range state.dragging state.minimap
             ]
