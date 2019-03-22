@@ -1003,6 +1003,7 @@ type Msg
     | DragSelector Float
     | DragEndSelector Float
     | SelectLine String
+    | Click Float Float
     | Tick Float
 
 
@@ -1098,6 +1099,47 @@ updateHelp msg settings chart state =
               }
             , Cmd.none
             )
+
+        Click clientX width ->
+            let
+                targetPosition =
+                    state.range.from + (state.range.to - state.range.from) * clientX / width
+
+                ( firstX, lastX ) =
+                    ( Data.firstChartX chart, Data.lastChartX chart )
+
+                asdklj =
+                    Data.foldlChart
+                        (\x bunch acc ->
+                            case acc.result of
+                                Nothing ->
+                                    let
+                                        position =
+                                            (x - firstX) / (lastX - firstX)
+                                    in
+                                    if position >= targetPosition then
+                                        case acc.prev of
+                                            Nothing ->
+                                                { acc | result = Just ( x, bunch ) }
+
+                                            Just ( prevPosition, prevX, prevBunch ) ->
+                                                if position - targetPosition <= targetPosition - prevPosition then
+                                                    { acc | result = Just ( x, bunch ) }
+
+                                                else
+                                                    { acc | result = Just ( prevX, prevBunch ) }
+
+                                    else
+                                        { acc | prev = Just ( position, x, bunch ) }
+
+                                _ ->
+                                    acc
+                        )
+                        { prev = Nothing, result = Nothing }
+                        chart
+                        |> Debug.log ""
+            in
+            ( state, Cmd.none )
 
         Tick delta ->
             let
@@ -1511,6 +1553,14 @@ viewCanvas settings chart status range canvas =
             , viewFractionsTextY fractionsY
             ]
         , viewFractionsX fractionsX
+        , div
+            [ Html.Attributes.class (element "glass" [])
+            , Decode.map2 Click
+                (Decode.field "offsetX" Decode.float)
+                (Decode.at [ "target", "clientWidth" ] Decode.float)
+                |> Html.Events.on "click"
+            ]
+            []
         ]
 
 
