@@ -231,9 +231,7 @@ selectLimits selector chart status =
                     )
                 |> Data.foldlChart selector
                     { timeline = Nothing
-
-                    -- @TODO , values = Just (Limits 0 0)
-                    , values = Nothing
+                    , values = Just (Limits 0 0)
                     , approximation = NoApproximate
                     }
     in
@@ -1699,8 +1697,12 @@ viewFractionsX fractions =
         )
 
 
-viewFractionsY : List (Fraction Int) -> Svg msg
-viewFractionsY fractions =
+viewFractionsY : Viewport -> List (Fraction Int) -> Svg msg
+viewFractionsY viewport fractions =
+    let
+        paddingX =
+            15 * toFloat config.viewbox.width / viewport.width
+    in
     g
         []
         (List.map
@@ -1709,7 +1711,7 @@ viewFractionsY fractions =
                     [ Svg.Attributes.class (element "chart-line" [ flag "accent" (fraction.value == 0) ])
                     , Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
                     , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
-                    , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewbox.width) 0)
+                    , Svg.Attributes.d ("M" ++ coordinate paddingX 0 ++ "L" ++ coordinate (toFloat config.viewbox.width - paddingX) 0)
                     ]
                     []
             )
@@ -1717,15 +1719,19 @@ viewFractionsY fractions =
         )
 
 
-viewFractionsTextY : List (Fraction Int) -> Svg msg
-viewFractionsTextY fractions =
+viewFractionsTextY : Viewport -> List (Fraction Int) -> Svg msg
+viewFractionsTextY viewport fractions =
+    let
+        paddingX =
+            15 * toFloat config.viewbox.width / viewport.width
+    in
     g
         []
         (List.map
             (\fraction ->
                 Svg.text_
                     [ Svg.Attributes.class (element "chart-fraction-text" [])
-                    , Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
+                    , Svg.Attributes.transform ("translate(" ++ coordinate paddingX fraction.position ++ ")")
                     , Svg.Attributes.y "-8"
                     , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
                     ]
@@ -1863,8 +1869,8 @@ viewTitle title =
         ]
 
 
-viewCanvas : Settings -> Chart -> Status -> Range -> Maybe Select -> CanvasDragging -> Canvs -> Html Msg
-viewCanvas settings chart status range select dragging canvas =
+viewCanvas : Settings -> Viewport -> Chart -> Status -> Range -> Maybe Select -> CanvasDragging -> Canvs -> Html Msg
+viewCanvas settings viewport chart status range select dragging canvas =
     let
         fractionsX =
             drawFractionsX settings chart canvas.limitsX
@@ -1893,9 +1899,9 @@ viewCanvas settings chart status range select dragging canvas =
             [ Svg.Attributes.viewBox (makeViewBox 0 -60 config.viewbox.width (config.viewbox.height + 60 + 22))
             , Svg.Attributes.class (element "svg" [])
             ]
-            [ viewFractionsY fractionsY
+            [ viewFractionsY viewport fractionsY
             , viewLines 2 settings (drawCanvas settings config.viewbox chart status canvas)
-            , viewFractionsTextY fractionsY
+            , viewFractionsTextY viewport fractionsY
             , case selectConfig of
                 Nothing ->
                     Svg.text ""
@@ -2050,26 +2056,33 @@ view (Model settings chart state) =
                 ]
             )
         ]
-        [ viewCanvas settings
-            chart
-            state.status
-            state.range
-            state.select
-            state.canvasDragging
-            state.canvs
-        , viewContainer
-            [ viewMinimap settings
-                chart
-                state.status
-                state.range
-                state.minimapDragging
-                state.minimap
-            ]
-        , viewContainer
-            [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
-            ]
-        , viewSpaceCreator
-        , viewContainer
-            [ viewModeButton state.mode
-            ]
-        ]
+        (case state.viewport of
+            Nothing ->
+                []
+
+            Just viewport ->
+                [ viewCanvas settings
+                    viewport
+                    chart
+                    state.status
+                    state.range
+                    state.select
+                    state.canvasDragging
+                    state.canvs
+                , viewContainer
+                    [ viewMinimap settings
+                        chart
+                        state.status
+                        state.range
+                        state.minimapDragging
+                        state.minimap
+                    ]
+                , viewContainer
+                    [ viewLinesVisibility state.status (Dict.values (Data.getChartLines chart))
+                    ]
+                , viewSpaceCreator
+                , viewContainer
+                    [ viewModeButton state.mode
+                    ]
+                ]
+        )
