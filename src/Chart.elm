@@ -661,30 +661,11 @@ drawSelect { animation } viewbox chart status canvas select =
                 }
 
 
-
--- @TODO move color directly to view
-
-
 type alias Fraction value =
-    { color : String
-    , opacity : Float
+    { opacity : Float
     , value : value
     , position : Float
     }
-
-
-fractionX : Float -> Int -> Float -> Fraction Time.Posix
-fractionX opacity timestamp position =
-    Fraction "" opacity (Time.millisToPosix timestamp) position
-
-
-fractionY : Float -> Int -> Float -> Fraction Int
-fractionY opacity value position =
-    if value == 0 then
-        Fraction "#dce3ea" opacity value position
-
-    else
-        Fraction "#f2f4f5" opacity value position
 
 
 adjustBiSignLimitsY : Int -> Limits -> Limits
@@ -738,7 +719,7 @@ drawStaticFractionsY limitsY =
     in
     List.map
         (\index ->
-            fractionY 1
+            Fraction 1
                 (round ((shiftY - toFloat index) * pointsPerFraction))
                 (toFloat index * scaleY)
         )
@@ -792,12 +773,12 @@ drawAnimatedFractionsY { animation } countdown limitsYStart limitsYEnd =
                     round ((shiftYEnd - toFloat index) * pointsPerFractionEnd)
             in
             if startValue == endValue then
-                [ fractionY 1 startValue (toFloat index * calcDone scaleYStart scaleYEnd doneEnd)
+                [ Fraction 1 startValue (toFloat index * calcDone scaleYStart scaleYEnd doneEnd)
                 ]
 
             else
-                [ fractionY doneStart startValue (toFloat index * scaleYStart)
-                , fractionY doneEnd endValue (toFloat index * scaleYEnd)
+                [ Fraction doneStart startValue (toFloat index * scaleYStart)
+                , Fraction doneEnd endValue (toFloat index * scaleYEnd)
                 ]
         )
         (List.range 0 config.fractionsCountY)
@@ -869,8 +850,8 @@ foo length first last opacity limitsX =
     in
     \index timestamp ->
         if index >= indexFrom && index <= indexTo && remainderBy each index == 0 then
-            fractionX opacity
-                (round timestamp)
+            Fraction opacity
+                (Time.millisToPosix (round timestamp))
                 ((timestamp - limitsX.min) / deltaX)
                 |> Just
 
@@ -1699,10 +1680,12 @@ viewFractionsY fractions =
         (List.map
             (\fraction ->
                 path
-                    [ Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
-                    , Svg.Attributes.stroke fraction.color
-                    , Svg.Attributes.strokeWidth "1"
-                    , Svg.Attributes.fill "none"
+                    [ Svg.Attributes.class (element "chart-line" [ flag "accent" (fraction.value == 0) ])
+                    , Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
+
+                    -- , Svg.Attributes.stroke fraction.color
+                    -- , Svg.Attributes.strokeWidth "1"
+                    -- , Svg.Attributes.fill "none"
                     , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
                     , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewbox.width) 0)
                     ]
@@ -1719,12 +1702,9 @@ viewFractionsTextY fractions =
         (List.map
             (\fraction ->
                 Svg.text_
-                    [ Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
+                    [ Svg.Attributes.class (element "chart-fraction-text" [])
+                    , Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
                     , Svg.Attributes.y "-8"
-                    , Svg.Attributes.fontSize "14"
-                    , Svg.Attributes.fontWeight "300"
-                    , Svg.Attributes.fontFamily "sans-serif"
-                    , Svg.Attributes.fill "#afb9c1"
                     , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
                     ]
                     [ Svg.text (String.fromInt fraction.value)
@@ -1739,7 +1719,8 @@ viewSelectedPoints x points =
     g
         []
         [ path
-            [ Svg.Attributes.transform ("translate(" ++ coordinate x 0 ++ ")")
+            [ Svg.Attributes.class (element "chart-line" [ flag "selected" True ])
+            , Svg.Attributes.transform ("translate(" ++ coordinate x 0 ++ ")")
             , Svg.Attributes.stroke "#dce3ea"
             , Svg.Attributes.strokeWidth "1"
             , Svg.Attributes.fill "none"
@@ -1751,12 +1732,11 @@ viewSelectedPoints x points =
             (List.map
                 (\point ->
                     circle
-                        [ Svg.Attributes.cx (String.fromFloat x)
+                        [ Svg.Attributes.class (element "chart-circle" [])
+                        , Svg.Attributes.cx (String.fromFloat x)
                         , Svg.Attributes.cy (String.fromFloat (Tuple.second point.value))
                         , Svg.Attributes.r "5"
-                        , Svg.Attributes.strokeWidth "2"
                         , Svg.Attributes.stroke point.color
-                        , Svg.Attributes.fill "#fff"
                         ]
                         []
                 )

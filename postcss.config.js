@@ -8,7 +8,9 @@ const autoprefixer = require('autoprefixer');
 module.exports = {
     plugins: [
         import_(),
-        customProperties(),
+        customProperties({
+            preserve: false
+        }),
         calc({
             precision: 2
         }),
