@@ -851,8 +851,8 @@ drawStaticFractionsXHelp fr bars =
         |> Tuple.second
 
 
-foo : Int -> Float -> Float -> Float -> Limits -> Int -> Float -> Maybe (Fraction Time.Posix)
-foo length first last opacity limitsX =
+drawPointX : Int -> Float -> Float -> Float -> Limits -> Int -> Float -> Maybe (Fraction Time.Posix)
+drawPointX length first last opacity limitsX =
     let
         pointsPerFraction =
             calcPointsPerFraction config.fractionsCountX limitsX
@@ -898,7 +898,7 @@ drawFractionsX { animation } chart transition =
                     case transition of
                         Stat limitsXEnd ->
                             drawStaticFractionsXHelp (first :: tail)
-                                [ foo length first last 1 limitsXEnd
+                                [ drawPointX length first last 1 limitsXEnd
                                 ]
 
                         Anim countdown limitsXEnd limitsXStartList ->
@@ -908,7 +908,7 @@ drawFractionsX { animation } chart transition =
                                     1 - countdown / animation.duration
                             in
                             drawStaticFractionsXHelp (first :: tail)
-                                [ foo length first last opacityFirst limitsXEnd
+                                [ drawPointX length first last opacityFirst limitsXEnd
                                 ]
 
 
@@ -1103,13 +1103,18 @@ init : Settings -> Chart -> ( Model, Cmd Msg )
 init settings chart =
     let
         initialStatus =
-            Dict.map (\_ _ -> Visible) (Data.getChartLines chart)
+            Dict.map (\_ _ -> FadeIn settings.animation.duration) (Data.getChartLines chart)
+
+        ( limitsX, limitsY ) =
+            Maybe.withDefault
+                ( Limits 0 0, Limits 0 0 )
+                (selectLimits selectorAll chart initialStatus)
 
         initialMinimap =
-            Can (Limits 1 1) (Static (Limits 1 1))
+            Can limitsX (Static limitsY)
 
         initialCanvs =
-            Can (Stat (Limits 1 1)) (Static (Limits 1 1))
+            Can (Stat limitsX) (Static (Limits (limitsY.min * 2) (limitsY.max * 2)))
     in
     ( State
         Nothing
