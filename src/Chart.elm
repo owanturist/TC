@@ -885,19 +885,9 @@ drawFractionsX { animation } chart transition =
                                     -- 0 → 1
                                     1 - countdown / animation.duration
                             in
-                            List.foldl
-                                (\( cd, limitsXStart ) acc ->
-                                    let
-                                        opacity =
-                                            -- 1 → 0
-                                            cd / animation.duration
-                                    in
-                                    foo length first last opacity limitsXStart :: acc
-                                )
+                            drawStaticFractionsXHelp (first :: tail)
                                 [ foo length first last opacityFirst limitsXEnd
                                 ]
-                                limitsXStartList
-                                |> drawStaticFractionsXHelp (first :: tail)
 
 
 
