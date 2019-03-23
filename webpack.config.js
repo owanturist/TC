@@ -21,8 +21,8 @@ module.exports = _env => {
         },
 
         output: {
-            path: path.resolve('./build'),
-            filename: '_[name]-[hash].js'
+            path: path.resolve('./docs'),
+            filename: '[name].js'
         },
 
         module: {
@@ -99,7 +99,7 @@ module.exports = _env => {
             })
         ].concat(env.prod ? [
             new MiniCssExtractPlugin({
-                filename: "_[name]-[hash].css",
+                filename: "[name].css",
                 chunkFilename: "[id].css"
             }),
             new BundleAnalyzerPlugin({
