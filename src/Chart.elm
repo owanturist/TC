@@ -1905,16 +1905,19 @@ viewCanvas settings chart status range select dragging canvas =
             ]
         , viewTitle settings.title
         , viewFractionsX fractionsX
+        , case selectConfig of
+            Nothing ->
+                text ""
+
+            Just conf ->
+                viewSelectedPopup range conf.posix conf.position conf.points
         , viewGlass
         , case selectConfig of
             Nothing ->
                 text ""
 
             Just conf ->
-                div []
-                    [ viewSelectedLine range conf.position
-                    , viewSelectedPopup range conf.posix conf.position conf.points
-                    ]
+                viewSelectedLine range conf.position
         ]
 
 
