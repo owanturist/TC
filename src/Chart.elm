@@ -296,9 +296,16 @@ isTransitionRun transition =
 
 selectTransitionX : Settings -> Limits -> Trans Limits -> Trans Limits
 selectTransitionX { animation } limitsX transition =
+    let
+        deltaX =
+            limitsX.max - limitsX.min
+
+        sigmaX =
+            deltaX * 0.01
+    in
     case transition of
         Stat limitsXEnd ->
-            if limitsXEnd.max - limitsXEnd.min == limitsX.max - limitsX.min then
+            if abs (limitsXEnd.max - limitsXEnd.min - deltaX) <= sigmaX then
                 Stat limitsX
 
             else
@@ -308,7 +315,7 @@ selectTransitionX { animation } limitsX transition =
                     ]
 
         Anim countdown limitsXEnd limitsXStartList ->
-            if limitsXEnd.max - limitsXEnd.min == limitsX.max - limitsX.min then
+            if abs (limitsXEnd.max - limitsXEnd.min - deltaX) <= sigmaX then
                 Anim countdown limitsX limitsXStartList
 
             else
