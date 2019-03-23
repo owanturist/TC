@@ -1107,10 +1107,10 @@ init settings chart =
             Dict.map (\_ _ -> Visible) (Data.getChartLines chart)
 
         initialMinimap =
-            Can (Limits 0 0) (Static (Limits 0 0))
+            Can (Limits 1 1) (Static (Limits 1 1))
 
         initialCanvs =
-            Can (Stat (Limits 0 0)) (Static (Limits 0 0))
+            Can (Stat (Limits 1 1)) (Static (Limits 1 1))
     in
     ( State
         Nothing
@@ -1427,19 +1427,11 @@ type alias Viewbox =
     }
 
 
-makeViewBox : Viewbox -> String
-makeViewBox { width, height } =
-    [ 0, 0, width, height ]
+makeViewBox : Int -> Int -> Int -> Int -> String
+makeViewBox x y width height =
+    [ x, y, width, height ]
         |> List.map String.fromInt
         |> String.join " "
-
-
-type alias Padding =
-    { top : Float
-    , right : Float
-    , bottom : Float
-    , left : Float
-    }
 
 
 type alias Config =
@@ -1888,7 +1880,7 @@ viewCanvas settings chart status range select dragging canvas =
             :: handlers
         )
         [ svg
-            [ Svg.Attributes.viewBox (makeViewBox config.viewbox)
+            [ Svg.Attributes.viewBox (makeViewBox 0 -80 config.viewbox.width (config.viewbox.height + 80 + 22))
             , Svg.Attributes.class (element "svg" [])
             ]
             [ viewFractionsY fractionsY
@@ -1925,7 +1917,7 @@ viewMinimap settings chart status range dragging minimap =
         [ Html.Attributes.class (element "minimap" [])
         ]
         [ svg
-            [ Svg.Attributes.viewBox (makeViewBox viewbox)
+            [ Svg.Attributes.viewBox (makeViewBox 0 0 viewbox.width viewbox.height)
             , Svg.Attributes.class (element "svg" [])
             ]
             [ viewLines 1 settings (drawMinimap settings viewbox chart status minimap)
