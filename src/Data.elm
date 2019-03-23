@@ -1,7 +1,7 @@
 module Data exposing
     ( Chart
     , Line
-    , decode
+    , decoder
     , filterChartLines
     , firstChartX
     , foldlChart
@@ -205,7 +205,7 @@ convertColumnsFromListToDict json =
                 (Decode.map (Encode.list identity << List.drop 1) (Decode.list Decode.value))
                 |> Decode.list
 
-        decoder =
+        dataDecoder =
             Decode.map4
                 (\columns types names colors ->
                     [ ( "columns", Encode.object columns )
@@ -219,7 +219,7 @@ convertColumnsFromListToDict json =
                 (Decode.field "names" Decode.value)
                 (Decode.field "colors" Decode.value)
     in
-    case decodeValue decoder json of
+    case decodeValue dataDecoder json of
         Err _ ->
             Encode.null
 
@@ -285,6 +285,15 @@ chartDecoder xDecoder yDecoder =
             )
 
 
-decode : Decoder x -> Decoder y -> Value -> Result Decode.Error (Chart x y)
-decode xDecoder yDecoder json =
-    decodeValue (chartDecoder xDecoder yDecoder) (convertColumnsFromListToDict json)
+decoder : Decoder x -> Decoder y -> Decoder (Chart x y)
+decoder xDecoder yDecoder =
+    Decode.andThen
+        (\json ->
+            case decodeValue (chartDecoder xDecoder yDecoder) json of
+                Err err ->
+                    Decode.fail (Decode.errorToString err)
+                Ok chart ->
+                    Decode.succeed chart
+        )
+        (Decode.map convertColumnsFromListToDict Decode.value)
+

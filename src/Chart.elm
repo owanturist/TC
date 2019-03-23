@@ -1,4 +1,4 @@
-module Chart exposing (Model, Msg, Settings, init, subscriptions, update, view)
+module Chart exposing (Animation, Model, Msg, Settings, init, subscriptions, update, view)
 
 import Browser.Dom
 import Browser.Events
@@ -936,6 +936,7 @@ type alias Animation =
 
 type alias Settings =
     { id : String
+    , title : String
     , animation : Animation
     }
 
@@ -1853,6 +1854,15 @@ viewGlass =
         []
 
 
+viewTitle : String -> Html msg
+viewTitle title =
+    div
+        [ Html.Attributes.class (element "title" [])
+        ]
+        [ text title
+        ]
+
+
 viewCanvas : Settings -> Chart -> Status -> Range -> Maybe Select -> CanvasDragging -> Canvs -> Html Msg
 viewCanvas settings chart status range select dragging canvas =
     let
@@ -1880,7 +1890,7 @@ viewCanvas settings chart status range select dragging canvas =
             :: handlers
         )
         [ svg
-            [ Svg.Attributes.viewBox (makeViewBox 0 -80 config.viewbox.width (config.viewbox.height + 80 + 22))
+            [ Svg.Attributes.viewBox (makeViewBox 0 -60 config.viewbox.width (config.viewbox.height + 60 + 22))
             , Svg.Attributes.class (element "svg" [])
             ]
             [ viewFractionsY fractionsY
@@ -1893,6 +1903,7 @@ viewCanvas settings chart status range select dragging canvas =
                 Just conf ->
                     viewSelectedPoints conf.x conf.points
             ]
+        , viewTitle settings.title
         , viewFractionsX fractionsX
         , viewGlass
         , case selectConfig of

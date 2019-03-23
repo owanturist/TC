@@ -4,8 +4,7 @@ import Browser
 import Chart
 import Data
 import Html exposing (Html, code, text)
-import Json.Decode as Decode exposing (Value)
-import Time
+import Json.Decode as Decode exposing (Decoder, Value, decodeValue)
 
 
 
@@ -13,9 +12,34 @@ import Time
 
 
 type alias Flags =
-    { id : String
-    , data : Value
+    { chart : Data.Chart Int Int
+    , id : String
+    , title : String
+    , animation : Chart.Animation
     }
+
+
+flagsDecoder : Decoder Flags
+flagsDecoder =
+    Decode.map4 Flags
+        (Decode.field "data"
+            (Data.decoder
+                Decode.int
+                Decode.int
+            )
+        )
+        (Decode.field "id" Decode.string)
+        (Decode.field "title" Decode.string)
+        (Decode.map2 Chart.Animation
+            (Decode.at [ "animation", "duration" ] Decode.float
+                |> Decode.maybe
+                |> Decode.map (Maybe.withDefault 500)
+            )
+            (Decode.at [ "animation", "delay" ] Decode.float
+                |> Decode.maybe
+                |> Decode.map (Maybe.withDefault 50)
+            )
+        )
 
 
 
@@ -26,22 +50,20 @@ type alias Model =
     Result Decode.Error Chart.Model
 
 
-init : Flags -> ( Model, Cmd Msg )
-init flags =
-    case Data.decode (Decode.map Time.millisToPosix Decode.int) Decode.int flags.data of
+init : Value -> ( Model, Cmd Msg )
+init value =
+    case decodeValue flagsDecoder value of
         Err err ->
             ( Err err, Cmd.none )
 
-        Ok chart ->
+        Ok flags ->
             Chart.init
                 { id = flags.id
-                , animation =
-                    { duration = 500
-                    , delay = 50
-                    }
+                , title = flags.title
+                , animation = flags.animation
                 }
-                (chart
-                    |> Data.mapChartX (toFloat << Time.posixToMillis)
+                (flags.chart
+                    |> Data.mapChartX toFloat
                     |> Data.mapChartY toFloat
                 )
                 |> Tuple.mapFirst Ok
@@ -97,7 +119,7 @@ view model =
 -- M A I N
 
 
-main : Program Flags Model Msg
+main : Program Value Model Msg
 main =
     Browser.element
         { init = init
