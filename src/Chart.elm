@@ -54,8 +54,8 @@ type alias Overlap =
     }
 
 
-calcLimitsOverlap : Viewbox -> Float -> Limits -> Limits -> Overlap
-calcLimitsOverlap viewbox done limitsStart limitsEnd =
+calcLimitsOverlap : Int -> Float -> Limits -> Limits -> Overlap
+calcLimitsOverlap viewboxHeight done limitsStart limitsEnd =
     let
         limitStartMin =
             calcDone limitsStart.min limitsEnd.min done
@@ -65,7 +65,7 @@ calcLimitsOverlap viewbox done limitsStart limitsEnd =
     in
     { min = limitStartMin
     , max = limitStartMax
-    , scale = calcScale viewbox.height (Limits limitStartMin limitStartMax)
+    , scale = calcScale viewboxHeight (Limits limitStartMin limitStartMax)
     }
 
 
@@ -231,7 +231,9 @@ selectLimits selector chart status =
                     )
                 |> Data.foldlChart selector
                     { timeline = Nothing
-                    , values = Just (Limits 0 0)
+
+                    -- @TODO , values = Just (Limits 0 0)
+                    , values = Nothing
                     , approximation = NoApproximate
                     }
     in
@@ -503,7 +505,7 @@ drawAnimated { animation } viewbox chart status countdown limitsX limitsYStart l
             easeOutQuad (1 - countdown / animation.duration)
 
         overlapY =
-            calcLimitsOverlap viewbox done limitsYStart limitsYEnd
+            calcLimitsOverlap viewbox.height done limitsYStart limitsYEnd
     in
     drawHelp
         (\x -> scaleX * (x - limitsX.min))
@@ -639,7 +641,7 @@ drawSelect { animation } viewbox chart status canvas select =
                         Animated countdown limitsYStart limitsYEnd ->
                             let
                                 overlapY =
-                                    calcLimitsOverlap viewbox
+                                    calcLimitsOverlap viewbox.height
                                         (easeOutQuad (1 - countdown / animation.duration))
                                         limitsYStart
                                         limitsYEnd
@@ -713,20 +715,26 @@ adjustLimitsY limitsY =
 drawStaticFractionsY : Limits -> List (Fraction Int)
 drawStaticFractionsY limitsY =
     let
+        paddingTop =
+            30
+
+        paddedLimitY =
+            { limitsY | max = (1 - paddingTop / toFloat config.viewbox.height) * limitsY.max }
+
         pointsPerFraction =
-            calcPointsPerFraction config.fractionsCountY limitsY
+            calcPointsPerFraction config.fractionsCountY paddedLimitY
 
         scaleY =
-            pointsPerFraction * calcScale config.viewbox.height limitsY
+            pointsPerFraction * calcScale (config.viewbox.height - paddingTop) paddedLimitY
 
         shiftY =
-            limitsY.max / pointsPerFraction
+            paddedLimitY.max / pointsPerFraction
     in
     List.map
         (\index ->
             Fraction 1
                 (round ((shiftY - toFloat index) * pointsPerFraction))
-                (toFloat index * scaleY)
+                (toFloat index * scaleY + paddingTop)
         )
         (List.range 0 config.fractionsCountY)
 
@@ -738,6 +746,15 @@ drawStaticFractionsY limitsY =
 drawAnimatedFractionsY : Settings -> Float -> Limits -> Limits -> List (Fraction Int)
 drawAnimatedFractionsY { animation } countdown limitsYStart limitsYEnd =
     let
+        paddingTop =
+            30
+
+        paddedLimitsYStart =
+            { limitsYStart | max = (1 - paddingTop / toFloat config.viewbox.height) * limitsYStart.max }
+
+        paddedLimitsYEnd =
+            { limitsYEnd | max = (1 - paddingTop / toFloat config.viewbox.height) * limitsYEnd.max }
+
         doneEnd =
             easeOutQuad (1 - countdown / animation.duration)
 
@@ -745,28 +762,28 @@ drawAnimatedFractionsY { animation } countdown limitsYStart limitsYEnd =
             1 - doneEnd
 
         pointsPerFractionStart =
-            calcPointsPerFraction config.fractionsCountY limitsYStart
+            calcPointsPerFraction config.fractionsCountY paddedLimitsYStart
 
         overlapYStart =
-            calcLimitsOverlap config.viewbox doneStart limitsYEnd limitsYStart
+            calcLimitsOverlap (config.viewbox.height - paddingTop) doneStart paddedLimitsYEnd paddedLimitsYStart
 
         scaleYStart =
             pointsPerFractionStart * overlapYStart.scale
 
         shiftYStart =
-            limitsYStart.max / pointsPerFractionStart
+            paddedLimitsYStart.max / pointsPerFractionStart
 
         pointsPerFractionEnd =
-            calcPointsPerFraction config.fractionsCountY limitsYEnd
+            calcPointsPerFraction config.fractionsCountY paddedLimitsYEnd
 
         overlapYEnd =
-            calcLimitsOverlap config.viewbox doneEnd limitsYStart limitsYEnd
+            calcLimitsOverlap (config.viewbox.height - paddingTop) doneEnd paddedLimitsYStart paddedLimitsYEnd
 
         scaleYEnd =
             pointsPerFractionEnd * overlapYEnd.scale
 
         shiftYEnd =
-            limitsYEnd.max / pointsPerFractionEnd
+            paddedLimitsYEnd.max / pointsPerFractionEnd
     in
     List.map
         (\index ->
@@ -778,12 +795,12 @@ drawAnimatedFractionsY { animation } countdown limitsYStart limitsYEnd =
                     round ((shiftYEnd - toFloat index) * pointsPerFractionEnd)
             in
             if startValue == endValue then
-                [ Fraction 1 startValue (toFloat index * calcDone scaleYStart scaleYEnd doneEnd)
+                [ Fraction 1 startValue (toFloat index * calcDone scaleYStart scaleYEnd doneEnd + paddingTop)
                 ]
 
             else
-                [ Fraction doneStart startValue (toFloat index * scaleYStart)
-                , Fraction doneEnd endValue (toFloat index * scaleYEnd)
+                [ Fraction doneStart startValue (toFloat index * scaleYStart + paddingTop)
+                , Fraction doneEnd endValue (toFloat index * scaleYEnd + paddingTop)
                 ]
         )
         (List.range 0 config.fractionsCountY)
@@ -1415,6 +1432,14 @@ makeViewBox { width, height } =
     [ 0, 0, width, height ]
         |> List.map String.fromInt
         |> String.join " "
+
+
+type alias Padding =
+    { top : Float
+    , right : Float
+    , bottom : Float
+    , left : Float
+    }
 
 
 type alias Config =
