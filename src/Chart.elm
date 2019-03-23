@@ -246,7 +246,7 @@ tickTransition settings delta transition =
 
         Delayed countdown limitsStart limitsEnd ->
             if delta >= countdown then
-                Animated (settings.animation.duration + delta - countdown) limitsStart limitsEnd
+                Animated (settings.animation.duration + countdown - delta) limitsStart limitsEnd
 
             else
                 Delayed (countdown - delta) limitsStart limitsEnd
