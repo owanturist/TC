@@ -981,6 +981,7 @@ applySelectorDragging dragging end =
 type CanvasDragging
     = NoCanvasDragging
     | SelectorChanging Select Float Float
+    | CanvasDragging Range Float Float
 
 
 applyCanvasDragging : CanvasDragging -> Float -> State -> State
@@ -995,6 +996,13 @@ applyCanvasDragging dragging end state =
                     select.position + (state.range.to - state.range.from) * ((end - start) / width)
             in
             { state | select = Just { select | position = clamp 0 1 nextPosition } }
+
+        CanvasDragging { from, to } start width ->
+            let
+                delta =
+                    clamp (to - 1) from ((to - from) * (end - start) / width)
+            in
+            { state | range = Range (from - delta) (to - delta) }
 
 
 type Visibility
@@ -1141,6 +1149,7 @@ type Msg
     | DragSelector Float
     | DragEndSelector Float
     | StartSelectChanging Float Float
+    | StartCanvasDragging Float Float
     | DragSelect Float
     | DragEndSelect Float
     | SelectPoints Float Float
@@ -1225,8 +1234,21 @@ updateHelp msg settings chart state =
             , Cmd.none
             )
 
+        StartCanvasDragging start width ->
+            ( { state | canvasDragging = CanvasDragging state.range start width }
+            , Cmd.none
+            )
+
         DragSelect end ->
-            ( applyCanvasDragging state.canvasDragging end state
+            let
+                nextState =
+                    applyCanvasDragging state.canvasDragging end state
+            in
+            ( if state.range == nextState.range then
+                nextState
+
+              else
+                { nextState | canvs = Maybe.withDefault state.canvs (selectWithRange settings nextState.range chart nextState.status nextState.canvs) }
             , Cmd.none
             )
 
@@ -1821,6 +1843,7 @@ viewGlass =
             (Decode.field "offsetX" Decode.float)
             (Decode.at [ "target", "clientWidth" ] Decode.float)
             |> Html.Events.on "click"
+        , Html.Events.on "touchstart" (withSelectedLineTouchAndWidthX StartCanvasDragging)
         ]
         []
 
