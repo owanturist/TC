@@ -939,11 +939,11 @@ type MinimapDragging
     | SelectorAreaChanging Range Float Float
 
 
-applySelectorDragging : MinimapDragging -> Float -> Maybe Range
-applySelectorDragging dragging end =
+applySelectorDragging : MinimapDragging -> Float -> State -> State
+applySelectorDragging dragging end state =
     case dragging of
         NoMinimapDragging ->
-            Nothing
+            state
 
         SelectorFromChanging { from, to } start width ->
             let
@@ -951,10 +951,7 @@ applySelectorDragging dragging end =
                 delta =
                     clamp -from ((to - from) - 48 / width) ((end - start) / width)
             in
-            Just
-                { from = from + delta
-                , to = to
-                }
+            { state | range = Range (from + delta) to }
 
         SelectorToChanging { from, to } start width ->
             let
@@ -962,20 +959,14 @@ applySelectorDragging dragging end =
                 delta =
                     clamp ((from - to) + 48 / width) (1 - to) ((end - start) / width)
             in
-            Just
-                { from = from
-                , to = to + delta
-                }
+            { state | range = Range from (to + delta) }
 
         SelectorAreaChanging { from, to } start width ->
             let
                 delta =
                     clamp -from (1 - to) ((end - start) / width)
             in
-            Just
-                { from = from + delta
-                , to = to + delta
-                }
+            { state | range = Range (from + delta) (to + delta) }
 
 
 type CanvasDragging
@@ -1207,15 +1198,15 @@ updateHelp msg settings chart state =
             )
 
         DragSelector end ->
-            ( case applySelectorDragging state.minimapDragging end of
-                Nothing ->
-                    state
+            let
+                nextState =
+                    applySelectorDragging state.minimapDragging end state
+            in
+            ( if state.range == nextState.range then
+                nextState
 
-                Just nextRange ->
-                    { state
-                        | range = nextRange
-                        , canvs = Maybe.withDefault state.canvs (selectWithRange settings nextRange chart state.status state.canvs)
-                    }
+              else
+                { nextState | canvs = Maybe.withDefault state.canvs (selectWithRange settings nextState.range chart nextState.status nextState.canvs) }
             , Cmd.none
             )
 
