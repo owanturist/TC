@@ -231,9 +231,7 @@ selectLimits selector chart status =
                     )
                 |> Data.foldlChart selector
                     { timeline = Nothing
-
-                    -- @TODO Set Limits 0 0
-                    , values = Nothing
+                    , values = Just (Limits 0 0)
                     , approximation = NoApproximate
                     }
     in
@@ -1682,10 +1680,6 @@ viewFractionsY fractions =
                 path
                     [ Svg.Attributes.class (element "chart-line" [ flag "accent" (fraction.value == 0) ])
                     , Svg.Attributes.transform ("translate(" ++ coordinate 0 fraction.position ++ ")")
-
-                    -- , Svg.Attributes.stroke fraction.color
-                    -- , Svg.Attributes.strokeWidth "1"
-                    -- , Svg.Attributes.fill "none"
                     , Svg.Attributes.opacity (String.fromFloat fraction.opacity)
                     , Svg.Attributes.d ("M" ++ coordinate 0 0 ++ "L" ++ coordinate (toFloat config.viewbox.width) 0)
                     ]
